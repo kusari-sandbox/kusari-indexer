@@ -1,0 +1,75 @@
+# .github/workflows/test-action.yml
+name: Test SCIP Index Action
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-action:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    container:
+      image: ghcr.io/${{ github.repository }}:latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+
+    # Create some test files to simulate a project
+    - name: Setup test projects
+      run: |
+        # Create a Go project
+        mkdir -p test-go
+        cd test-go
+        echo 'module test-go' > go.mod
+        echo 'package main
+        
+        import "fmt"
+        
+        func main() {
+            fmt.Println("Hello, World!")
+        }' > main.go
+        cd ..
+        
+        # Create a TypeScript project  
+        mkdir -p test-ts
+        cd test-ts
+        echo '{"name": "test-ts", "version": "1.0.0"}' > package.json
+        echo 'console.log("Hello, TypeScript!");' > index.ts
+        cd ..
+        
+        # Create a Python project
+        mkdir -p test-python
+        cd test-python
+        echo 'print("Hello, Python!")' > main.py
+        echo 'requests==2.25.1' > requirements.txt
+        cd ..
+
+    - name: Test the action
+      id: test-scip
+      uses: ./
+      
+    - name: Verify outputs
+      run: |
+        echo "=== Action Outputs ==="
+        echo "Success count: ${{ steps.test-scip.outputs.success-count }}"
+        echo "Total count: ${{ steps.test-scip.outputs.total-count }}"
+        echo "Skipped: ${{ steps.test-scip.outputs.skipped }}"
+        echo "Changed projects: ${{ steps.test-scip.outputs.changed-projects }}"
+        echo "Index list: ${{ steps.test-scip.outputs.index-list }}"
+        echo "Total size: ${{ steps.test-scip.outputs.total-size }}"
+        
+    - name: Check for generated indexes
+      run: |
+        echo "=== Checking for generated SCIP indexes ==="
+        find . -name "index.scip" -type f | while read -r scip_file; do
+          echo "Found: $scip_file ($(stat -c%s "$scip_file") bytes)"
+        done

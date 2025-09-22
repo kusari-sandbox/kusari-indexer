@@ -67,15 +67,6 @@ jobs:
         fi
 ```
 
-## Requirements
-
-### Docker Image
-Your container image must have the following SCIP tools pre-installed:
-- `scip-go` - for Go projects
-- `scip-typescript` - for TypeScript/JavaScript projects
-- `scip-python` - for Python projects
-- `scip-java` - for Java projects
-
 ### Permissions
 ```yaml
 permissions:
