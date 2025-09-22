@@ -209,16 +209,6 @@ jobs:
         
         echo "=== Test completed ==="
 
-    - name: Verify outputs
-      run: |
-        echo "=== Action Outputs ==="
-        echo "Success count: ${{ steps.test-scip.outputs.success-count }}"
-        echo "Total count: ${{ steps.test-scip.outputs.total-count }}"
-        echo "Skipped: ${{ steps.test-scip.outputs.skipped }}"
-        echo "Changed projects: ${{ steps.test-scip.outputs.changed-projects }}"
-        echo "Index list: ${{ steps.test-scip.outputs.index-list }}"
-        echo "Total size: ${{ steps.test-scip.outputs.total-size }}"
-        
     - name: Check for generated indexes
       run: |
         echo "=== Checking for generated SCIP indexes ==="

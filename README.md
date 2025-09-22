@@ -30,7 +30,7 @@ jobs:
       contents: read
       pull-requests: write  # Required for PR comments
     container:
-      image: your-docker-image:latest  # Must have SCIP tools pre-installed
+      image: kusari-sandbox/kusari-indexer:latest
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -39,14 +39,14 @@ jobs:
         persist-credentials: false
 
     - name: Generate SCIP indexes
-      uses: your-org/scip-index-action@v1
+      uses: kusari-sandbox/kusari-indexer@v1
 ```
 
 ### With Custom Working Directory
 
 ```yaml
     - name: Generate SCIP indexes
-      uses: your-org/scip-index-action@v1
+      uses: kusari-sandbox/kusari-indexer@v1
       with:
         working-directory: ./src
 ```
@@ -56,7 +56,7 @@ jobs:
 ```yaml
     - name: Generate SCIP indexes
       id: scip
-      uses: your-org/scip-index-action@v1
+      uses: kusari-sandbox/kusari-indexer@v1
 
     - name: Process results
       run: |
