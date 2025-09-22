@@ -48,136 +48,103 @@ runs:
       run: |
         echo "=== Verifying pre-installed SCIP tools ==="
         
-        if command -v scip-go &> /dev/null; then
-          echo "✅ scip-go available"
-          scip-go --help > /dev/null 2>&1 || echo "⚠️ scip-go help failed"
-        else
-          echo "❌ scip-go not found"
-          exit 1
-        fi
-        
-        if command -v scip-typescript &> /dev/null; then
-          echo "✅ scip-typescript available"
-          scip-typescript --help > /dev/null 2>&1 || echo "⚠️ scip-typescript help failed"
-        else
-          echo "❌ scip-typescript not found"
-          exit 1
-        fi
-        
-        if command -v scip-python &> /dev/null; then
-          echo "✅ scip-python available"
-          scip-python --help > /dev/null 2>&1 || echo "⚠️ scip-python help failed"
-        else
-          echo "❌ scip-python not found"
-          exit 1
-        fi
-        
-        if command -v scip-java &> /dev/null; then
-          echo "✅ scip-java available"
-          scip-java --help > /dev/null 2>&1 || echo "⚠️ scip-java help failed"
-        else
-          echo "❌ scip-java not found"
-          exit 1
-        fi
+        for tool in scip-go scip-typescript scip-python scip-java; do
+          if command -v $tool &> /dev/null; then
+            echo "✅ $tool available"
+          else
+            echo "❌ $tool not found"
+            exit 1
+          fi
+        done
+
+    - name: Get changed files
+      id: changed-files
+      uses: tj-actions/changed-files@v44
+      with:
+        files: |
+          **/*.{go,ts,tsx,js,jsx,py,java,scala,kt}
+          **/go.mod
+          **/package.json
+          **/setup.py
+          **/pyproject.toml
+          **/requirements.txt
+          **/Pipfile
+          **/pom.xml
+          **/build.gradle
+          **/build.gradle.kts
 
     - name: Find changed project directories
       id: find-changed-projects
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        #!/bin/bash
-        set -e
-        
         echo "=== Finding projects with changed files ==="
         
-        # Get the base branch for comparison
-        if [ "${{ github.event_name }}" == "pull_request" ]; then
-          BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
-          HEAD_REF="HEAD"
-          echo "Comparing $BASE_REF..$HEAD_REF"
-        else
-          # For workflow_dispatch or push, compare with previous commit
-          BASE_REF="HEAD^"
-          HEAD_REF="HEAD"
-          echo "Comparing $BASE_REF..$HEAD_REF"
+        # Get changed files from previous step
+        changed_files="${{ steps.changed-files.outputs.all_changed_files }}"
+        
+        if [[ -z "$changed_files" ]]; then
+          echo "No relevant files changed"
+          echo "changed_projects=" >> $GITHUB_OUTPUT
+          echo "project_count=0" >> $GITHUB_OUTPUT
+          exit 0
         fi
         
-        # Get list of changed files
-        echo "Changed files:"
-        git diff --name-only $BASE_REF..$HEAD_REF
+        echo "Changed files: $changed_files"
         
-        # Function to find the project root for a given file
-        find_project_root() {
-          local file_path=$1
-          local dir_path=$(dirname "$file_path")
+        # Find unique project directories
+        project_dirs=""
+        declare -A seen_dirs
+        
+        for file in $changed_files; do
+          dir=$(dirname "$file")
           
-          # Start from the file's directory and walk up the tree
-          while [[ "$dir_path" != "." && "$dir_path" != "/" ]]; do
-            # Check if this directory contains project files
-            if [[ -f "$dir_path/go.mod" ]] || \
-               [[ -f "$dir_path/package.json" ]] || \
-               [[ -f "$dir_path/setup.py" ]] || \
-               [[ -f "$dir_path/pyproject.toml" ]] || \
-               [[ -f "$dir_path/requirements.txt" ]] || \
-               [[ -f "$dir_path/Pipfile" ]] || \
-               [[ -f "$dir_path/pom.xml" ]] || \
-               [[ -f "$dir_path/build.gradle" ]] || \
-               [[ -f "$dir_path/build.gradle.kts" ]]; then
-              echo "$dir_path"
-              return
+          # Walk up the directory tree to find project root
+          while [[ "$dir" != "." && "$dir" != "/" ]]; do
+            if [[ -f "$dir/go.mod" ]] || [[ -f "$dir/package.json" ]] || [[ -f "$dir/setup.py" ]] || \
+               [[ -f "$dir/pyproject.toml" ]] || [[ -f "$dir/pom.xml" ]] || [[ -f "$dir/build.gradle" ]] || \
+               [[ -f "$dir/build.gradle.kts" ]]; then
+              if [[ -z "${seen_dirs[$dir]}" ]]; then
+                seen_dirs["$dir"]=1
+                project_dirs="$project_dirs$dir"$'\n'
+                echo "Found project: $dir (from file: $file)"
+              fi
+              break
             fi
-            
-            # Move up one directory
-            dir_path=$(dirname "$dir_path")
+            dir=$(dirname "$dir")
           done
           
-          # If no project file found in parent dirs, check if root has project files
-          if [[ -f "./go.mod" ]] || \
-             [[ -f "./package.json" ]] || \
-             [[ -f "./setup.py" ]] || \
-             [[ -f "./pyproject.toml" ]] || \
-             [[ -f "./requirements.txt" ]] || \
-             [[ -f "./Pipfile" ]] || \
-             [[ -f "./pom.xml" ]] || \
-             [[ -f "./build.gradle" ]] || \
-             [[ -f "./build.gradle.kts" ]]; then
-            echo "."
-          fi
-        }
-        
-        # Collect unique project directories
-        changed_projects=""
-        declare -A project_set
-        
-        git diff --name-only $BASE_REF..$HEAD_REF | while read -r changed_file; do
-          if [[ -n "$changed_file" ]]; then
-            project_dir=$(find_project_root "$changed_file")
-            if [[ -n "$project_dir" ]] && [[ -z "${project_set[$project_dir]}" ]]; then
-              project_set["$project_dir"]=1
-              echo "File: $changed_file -> Project: $project_dir"
-              changed_projects="${changed_projects}${project_dir}\n"
+          # Check root directory as fallback
+          if [[ "$dir" == "." ]] && [[ -z "${seen_dirs[.]}" ]]; then
+            if [[ -f "./go.mod" ]] || [[ -f "./package.json" ]] || [[ -f "./setup.py" ]] || \
+               [[ -f "./pyproject.toml" ]] || [[ -f "./pom.xml" ]] || [[ -f "./build.gradle" ]] || \
+               [[ -f "./build.gradle.kts" ]]; then
+              seen_dirs["."]=1
+              project_dirs="$project_dirs."$'\n'
+              echo "Found project: . (from file: $file)"
             fi
           fi
         done
         
-        # Remove trailing newline and export
-        changed_projects=$(echo -e "$changed_projects" | sed '/^$/d')
+        # Clean up the output
+        project_dirs=$(echo -n "$project_dirs" | sed '/^$/d')
+        project_count=$(echo -n "$project_dirs" | wc -l)
+        
+        if [[ -z "$project_dirs" ]]; then
+          project_count=0
+        fi
         
         echo "=== Projects to process ==="
-        echo -e "$changed_projects"
+        echo "$project_dirs"
+        echo "Total projects: $project_count"
         
         # Export for next step
         {
           echo "changed_projects<<EOF"
-          echo -e "$changed_projects"
+          echo "$project_dirs"
           echo "EOF"
         } >> $GITHUB_OUTPUT
         
-        # Count projects
-        project_count=$(echo -e "$changed_projects" | wc -l)
-        if [[ -z "$changed_projects" ]]; then
-          project_count=0
-        fi
         echo "project_count=$project_count" >> $GITHUB_OUTPUT
 
     - name: Generate SCIP indexes
