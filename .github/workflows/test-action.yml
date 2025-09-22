@@ -169,23 +169,24 @@ jobs:
         echo "SBT:" && sbt --version
         echo "=== All tools installed successfully ==="
 
-    - name: Test the action script with real projects
+    - name: Test the complete action
+      id: test-action
+      uses: ./
+
+    - name: Verify action outputs
       run: |
-        echo "=== Testing the action script with simulated changes ==="
-        # Set up git configuration
-        git config --global --add safe.directory ${{ github.workspace }}
-        git config --global user.name 'Test User' 
-        git config --global user.email 'test@example.com'
+        echo "=== Action Test Results ==="
+        echo "Success count: ${{ steps.test-action.outputs.success-count }}"
+        echo "Total count: ${{ steps.test-action.outputs.total-count }}"
+        echo "Skipped: ${{ steps.test-action.outputs.skipped }}"
+        echo "Changed projects: ${{ steps.test-action.outputs.changed-projects }}"
+        echo "Index list: ${{ steps.test-action.outputs.index-list }}"
         
-        # Simulate the action finding changed projects
-        export CHANGED_PROJECTS='test-projects/go-project
-        test-projects/typescript-project
-        test-projects/python-project
-        test-projects/java-project'
-        export PROJECT_COUNT=4
-        
-        echo '=== Running SCIP generation script ==='
-        bash scripts/generate-scip.sh
+        echo "=== Final verification ==="
+        find test-projects -name "index.scip" -type f | while read -r scip_file; do
+          size=$(stat -c%s "$scip_file" 2>/dev/null || echo "unknown")
+          echo "Found: $scip_file ($size bytes)"
+        done
 
     - name: Verify test results
       run: |
