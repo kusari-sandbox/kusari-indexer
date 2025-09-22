@@ -1,11 +1,10 @@
-# Dockerfile
 FROM ubuntu:22.04
 
 # Set environment variables to avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=UTC
 
-# Install system dependencies
+# Install system dependencies (excluding nodejs/npm - we'll install newer versions)
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -13,14 +12,15 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     python3 \
     python3-pip \
-    nodejs \
-    npm \
     openjdk-17-jdk \
     openjdk-17-jre \
     bash \
     ca-certificates \
     unzip \
     && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs
 
 # Set Java environment variables
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
