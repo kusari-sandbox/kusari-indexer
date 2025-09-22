@@ -40,10 +40,11 @@ jobs:
         echo "Cloning Python project: psf/black"
         git clone --depth 1 https://github.com/psf/black.git python-project
         
-        # Java project - google/gson (JSON library)
-        echo "Cloning Java project: google/gson"
-        git clone --depth 1 https://github.com/google/gson.git java-project
+        # Java project - commons-lang
+        echo "Cloning Java project: commons-lang"
+        git clone --depth 10 https://github.com/apache/commons-lang.git java-project
         
+
         cd ..
         
         echo "=== Project structure ==="
