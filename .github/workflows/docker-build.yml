@@ -69,3 +69,10 @@ jobs:
           scip-java --help > /dev/null && echo '✅ scip-java works'
           echo '=== All tools verified ==='
         "
+
+    - name: Tag and push to ttl.sh
+      run: |
+        echo "Tagging and pushing to ttl.sh..."
+        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest ttl.sh/kusari-indexer:latest
+        docker push ttl.sh/kusari-indexer:latest
+        echo "✅ Image pushed to ttl.sh/kusari-indexer:latest"
