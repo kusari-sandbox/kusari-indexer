@@ -1,6 +1,5 @@
 #!/bin/bash
 # scripts/generate-scip.sh
-set -e
 
 echo "=== Processing $PROJECT_COUNT changed projects ==="
 
@@ -43,21 +42,22 @@ generate_scip_index() {
   if [[ -f "package.json" ]]; then
     echo "  -> Detected Node.js/TypeScript project"
     
-    # Install dependencies if needed
+    # Install dependencies if needed (with error handling)
+    echo "  -> Installing dependencies..."
     if [[ -f "package-lock.json" ]]; then
-      npm ci
+      npm ci || echo "  -> npm ci failed, continuing..."
     elif [[ -f "yarn.lock" ]]; then
       if ! command -v yarn &> /dev/null; then
-        npm install -g yarn
+        npm install -g yarn || echo "  -> Failed to install yarn"
       fi
-      yarn install --frozen-lockfile
+      yarn install --frozen-lockfile || yarn install || echo "  -> yarn install failed, continuing..."
     elif [[ -f "pnpm-lock.yaml" ]]; then
       if ! command -v pnpm &> /dev/null; then
-        npm install -g pnpm
+        npm install -g pnpm || echo "  -> Failed to install pnpm"
       fi
-      pnpm install --frozen-lockfile
+      pnpm install --frozen-lockfile || pnpm install || echo "  -> pnpm install failed, continuing..."
     else
-      npm install
+      npm install || echo "  -> npm install failed, continuing..."
     fi
     
     echo "  -> Generating TypeScript SCIP index..."
@@ -76,9 +76,11 @@ generate_scip_index() {
     
     # Install dependencies if requirements file exists
     if [[ -f "requirements.txt" ]]; then
-      pip3 install -r requirements.txt || echo "  -> Failed to install Python dependencies"
+      echo "  -> Installing Python requirements..."
+      pip3 install -r requirements.txt || echo "  -> Failed to install Python dependencies, continuing..."
     elif [[ -f "pyproject.toml" ]]; then
-      pip3 install . || echo "  -> Failed to install Python project"
+      echo "  -> Installing Python project..."
+      pip3 install . || echo "  -> Failed to install Python project, continuing..."
     fi
     
     echo "  -> Generating Python SCIP index..."
@@ -130,12 +132,16 @@ generate_scip_index() {
   cd - > /dev/null
 }
 
-# Process only the changed projects
-echo -e "$CHANGED_PROJECTS" | while read -r project_dir; do
+# Process changed projects using process substitution to avoid subshell
+while read -r project_dir; do
   if [[ -n "$project_dir" ]]; then
-    generate_scip_index "$project_dir"
+    echo "=== Processing project: $project_dir ==="
+    # Continue processing even if one project fails
+    if ! generate_scip_index "$project_dir"; then
+      echo "  -> ⚠️  Project processing failed but continuing with others..."
+    fi
   fi
-done
+done <<< "$CHANGED_PROJECTS"
 
 # Export results for use in comment
 echo "success_count=$success_count" >> $GITHUB_OUTPUT
@@ -146,3 +152,6 @@ echo "total_count=$total_count" >> $GITHUB_OUTPUT
   echo "EOF"
 } >> $GITHUB_OUTPUT
 echo "skipped=false" >> $GITHUB_OUTPUT
+
+echo "=== Summary ==="
+echo "Processed $total_count projects, $success_count successful"
