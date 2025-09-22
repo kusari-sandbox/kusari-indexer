@@ -1,0 +1,308 @@
+# action.yml
+name: 'Generate SCIP Indexes for Changed Projects'
+description: 'Automatically generates SCIP indexes for projects that have changed files in a PR or commit'
+branding:
+  icon: 'search'
+  color: 'blue'
+
+inputs:
+  working-directory:
+    description: 'Working directory to run the action from'
+    required: false
+    default: '.'
+
+outputs:
+  success-count:
+    description: 'Number of projects successfully processed'
+    value: ${{ steps.generate-indexes.outputs.success_count }}
+  
+  total-count:
+    description: 'Total number of projects found'
+    value: ${{ steps.generate-indexes.outputs.total_count }}
+  
+  failed-projects:
+    description: 'List of projects that failed processing'
+    value: ${{ steps.generate-indexes.outputs.failed_projects }}
+  
+  changed-projects:
+    description: 'List of projects that had changes'
+    value: ${{ steps.find-changed-projects.outputs.changed_projects }}
+  
+  skipped:
+    description: 'Whether processing was skipped (no changes found)'
+    value: ${{ steps.generate-indexes.outputs.skipped }}
+  
+  index-list:
+    description: 'List of generated index files'
+    value: ${{ steps.list-indexes.outputs.index_list }}
+  
+  total-size:
+    description: 'Total size of generated indexes'
+    value: ${{ steps.list-indexes.outputs.total_size }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify SCIP tools
+      shell: bash
+      run: |
+        echo "=== Verifying pre-installed SCIP tools ==="
+        
+        if command -v scip-go &> /dev/null; then
+          echo "✅ scip-go available"
+          scip-go --help > /dev/null 2>&1 || echo "⚠️ scip-go help failed"
+        else
+          echo "❌ scip-go not found"
+          exit 1
+        fi
+        
+        if command -v scip-typescript &> /dev/null; then
+          echo "✅ scip-typescript available"
+          scip-typescript --help > /dev/null 2>&1 || echo "⚠️ scip-typescript help failed"
+        else
+          echo "❌ scip-typescript not found"
+          exit 1
+        fi
+        
+        if command -v scip-python &> /dev/null; then
+          echo "✅ scip-python available"
+          scip-python --help > /dev/null 2>&1 || echo "⚠️ scip-python help failed"
+        else
+          echo "❌ scip-python not found"
+          exit 1
+        fi
+        
+        if command -v scip-java &> /dev/null; then
+          echo "✅ scip-java available"
+          scip-java --help > /dev/null 2>&1 || echo "⚠️ scip-java help failed"
+        else
+          echo "❌ scip-java not found"
+          exit 1
+        fi
+
+    - name: Find changed project directories
+      id: find-changed-projects
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        #!/bin/bash
+        set -e
+        
+        echo "=== Finding projects with changed files ==="
+        
+        # Get the base branch for comparison
+        if [ "${{ github.event_name }}" == "pull_request" ]; then
+          BASE_REF="origin/${{ github.event.pull_request.base.ref }}"
+          HEAD_REF="HEAD"
+          echo "Comparing $BASE_REF..$HEAD_REF"
+        else
+          # For workflow_dispatch or push, compare with previous commit
+          BASE_REF="HEAD^"
+          HEAD_REF="HEAD"
+          echo "Comparing $BASE_REF..$HEAD_REF"
+        fi
+        
+        # Get list of changed files
+        echo "Changed files:"
+        git diff --name-only $BASE_REF..$HEAD_REF
+        
+        # Function to find the project root for a given file
+        find_project_root() {
+          local file_path=$1
+          local dir_path=$(dirname "$file_path")
+          
+          # Start from the file's directory and walk up the tree
+          while [[ "$dir_path" != "." && "$dir_path" != "/" ]]; do
+            # Check if this directory contains project files
+            if [[ -f "$dir_path/go.mod" ]] || \
+               [[ -f "$dir_path/package.json" ]] || \
+               [[ -f "$dir_path/setup.py" ]] || \
+               [[ -f "$dir_path/pyproject.toml" ]] || \
+               [[ -f "$dir_path/requirements.txt" ]] || \
+               [[ -f "$dir_path/Pipfile" ]] || \
+               [[ -f "$dir_path/pom.xml" ]] || \
+               [[ -f "$dir_path/build.gradle" ]] || \
+               [[ -f "$dir_path/build.gradle.kts" ]]; then
+              echo "$dir_path"
+              return
+            fi
+            
+            # Move up one directory
+            dir_path=$(dirname "$dir_path")
+          done
+          
+          # If no project file found in parent dirs, check if root has project files
+          if [[ -f "./go.mod" ]] || \
+             [[ -f "./package.json" ]] || \
+             [[ -f "./setup.py" ]] || \
+             [[ -f "./pyproject.toml" ]] || \
+             [[ -f "./requirements.txt" ]] || \
+             [[ -f "./Pipfile" ]] || \
+             [[ -f "./pom.xml" ]] || \
+             [[ -f "./build.gradle" ]] || \
+             [[ -f "./build.gradle.kts" ]]; then
+            echo "."
+          fi
+        }
+        
+        # Collect unique project directories
+        changed_projects=""
+        declare -A project_set
+        
+        git diff --name-only $BASE_REF..$HEAD_REF | while read -r changed_file; do
+          if [[ -n "$changed_file" ]]; then
+            project_dir=$(find_project_root "$changed_file")
+            if [[ -n "$project_dir" ]] && [[ -z "${project_set[$project_dir]}" ]]; then
+              project_set["$project_dir"]=1
+              echo "File: $changed_file -> Project: $project_dir"
+              changed_projects="${changed_projects}${project_dir}\n"
+            fi
+          fi
+        done
+        
+        # Remove trailing newline and export
+        changed_projects=$(echo -e "$changed_projects" | sed '/^$/d')
+        
+        echo "=== Projects to process ==="
+        echo -e "$changed_projects"
+        
+        # Export for next step
+        {
+          echo "changed_projects<<EOF"
+          echo -e "$changed_projects"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+        
+        # Count projects
+        project_count=$(echo -e "$changed_projects" | wc -l)
+        if [[ -z "$changed_projects" ]]; then
+          project_count=0
+        fi
+        echo "project_count=$project_count" >> $GITHUB_OUTPUT
+
+    - name: Generate SCIP indexes
+      id: generate-indexes
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: ${{ github.action_path }}/scripts/generate-scip.sh
+      env:
+        CHANGED_PROJECTS: ${{ steps.find-changed-projects.outputs.changed_projects }}
+        PROJECT_COUNT: ${{ steps.find-changed-projects.outputs.project_count }}
+
+    - name: List generated indexes
+      id: list-indexes
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        echo "=== Generated SCIP index files ==="
+        index_list=""
+        total_size=0
+        
+        find . -name "index.scip" -type f | while read -r scip_file; do
+          dir=$(dirname "$scip_file")
+          size=$(stat -c%s "$scip_file" 2>/dev/null || stat -f%z "$scip_file" 2>/dev/null || echo "0")
+          total_size=$((total_size + size))
+          echo "📁 $dir -> index.scip ($size bytes)"
+          
+          # Format size for display
+          if command -v numfmt &> /dev/null; then
+            formatted_size=$(numfmt --to=iec-i --suffix=B $size)
+          else
+            formatted_size="${size}B"
+          fi
+          
+          index_list="$index_list\n- \`$dir\` ($formatted_size)"
+        done
+        
+        {
+          echo "index_list<<EOF"
+          echo -e "$index_list"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+        
+        # Format total size
+        if command -v numfmt &> /dev/null; then
+          total_size_formatted=$(numfmt --to=iec-i --suffix=B $total_size)
+        else
+          total_size_formatted="${total_size}B"
+        fi
+        
+        echo "total_size=$total_size_formatted" >> $GITHUB_OUTPUT
+
+    - name: Comment on PR with results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const successCount = '${{ steps.generate-indexes.outputs.success_count }}';
+          const totalCount = '${{ steps.generate-indexes.outputs.total_count }}';
+          const failedProjects = `${{ steps.generate-indexes.outputs.failed_projects }}`;
+          const indexList = `${{ steps.list-indexes.outputs.index_list }}`;
+          const totalSize = '${{ steps.list-indexes.outputs.total_size }}';
+          const skipped = '${{ steps.generate-indexes.outputs.skipped }}' === 'true';
+          const projectCount = '${{ steps.find-changed-projects.outputs.project_count }}';
+          
+          let comment = `## 🔍 SCIP Index Generation Results
+          
+          `;
+          
+          if (skipped) {
+            comment += `**Status:** ⚪ Skipped - No project files changed
+            
+            ### Summary
+            - **PR:** #${{ github.event.number }}
+            - **Commit:** \`${{ github.event.pull_request.head.sha }}\`
+            - **Branch:** \`${{ github.event.pull_request.head.ref }}\`
+            - **Changed projects:** 0
+            
+            No projects with source code changes detected in this PR.`;
+          } else {
+            const status = successCount == totalCount ? '✅' : '⚠️';
+            const statusText = successCount == totalCount ? 'All changed projects processed successfully' : `${successCount}/${totalCount} changed projects processed successfully`;
+            
+            comment += `**Status:** ${status} ${statusText}
+            
+            ### Summary
+            - **PR:** #${{ github.event.number }}
+            - **Commit:** \`${{ github.event.pull_request.head.sha }}\`
+            - **Branch:** \`${{ github.event.pull_request.head.ref }}\`
+            - **Changed projects:** ${projectCount}
+            - **Total indexes generated:** ${successCount}
+            - **Total size:** ${totalSize}
+            `;
+            
+            if (indexList && indexList.trim() !== '') {
+              comment += `
+            ### Generated Indexes
+            ${indexList}
+            `;
+            }
+            
+            if (failedProjects && failedProjects.trim() !== '') {
+              comment += `
+            ### Failed Projects
+            ${failedProjects}
+            `;
+            }
+          }
+          
+          comment += `
+          
+          <details>
+          <summary>View workflow details</summary>
+          
+          - **Workflow:** ${{ github.workflow }}
+          - **Run ID:** ${{ github.run_id }}
+          - **Run Number:** ${{ github.run_number }}
+          - **Actor:** @${{ github.actor }}
+          
+          [View full workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          
+          </details>`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
