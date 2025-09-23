@@ -9,35 +9,35 @@ inputs:
     description: 'Working directory to run the action from'
     required: false
     default: '.'
-  skip-dependency-install:
-    description: 'Skip installing project dependencies'
-    required: false
-    default: 'false'
 
 outputs:
   success-count:
     description: 'Number of projects successfully processed'
-    value: ${{ steps.process-results.outputs.success_count }}
+    value: ${{ steps.collect-results.outputs.success_count }}
   total-count:
     description: 'Total number of projects found'
-    value: ${{ steps.process-results.outputs.total_count }}
+    value: ${{ steps.collect-results.outputs.total_count }}
   failed-projects:
     description: 'List of projects that failed processing'
-    value: ${{ steps.process-results.outputs.failed_projects }}
+    value: ${{ steps.collect-results.outputs.failed_projects }}
   changed-projects:
     description: 'List of projects that had changes'
     value: ${{ steps.find-projects.outputs.changed_projects }}
   skipped:
     description: 'Whether processing was skipped (no changes found)'
-    value: ${{ steps.process-results.outputs.skipped }}
+    value: ${{ steps.collect-results.outputs.skipped }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Verify SCIP tools
+    # =============================================================================
+    # VERIFICATION AND SETUP
+    # =============================================================================
+    
+    - name: Verify SCIP tools are available
       shell: bash
       run: |
-        echo "=== Verifying pre-installed SCIP tools ==="
+        echo "=== Verifying SCIP tools ==="
         missing_tools=()
         
         for tool in scip-go scip-typescript scip-python scip-java; do
@@ -54,77 +54,112 @@ runs:
           exit 1
         fi
 
+    - name: Setup working directory
+      shell: bash
+      run: |
+        working_dir="${{ inputs.working-directory }}"
+        
+        echo "=== Setting up working directory ==="
+        echo "Input working-directory: '$working_dir'"
+        echo "Current directory: $(pwd)"
+        
+        if [[ "$working_dir" != "." && ! -d "$working_dir" ]]; then
+          echo "Creating working directory: $working_dir"
+          mkdir -p "$working_dir"
+        fi
+        
+        # Change to working directory and get absolute path
+        if ! cd "$working_dir"; then
+          echo "❌ Cannot access working directory: $working_dir"
+          exit 1
+        fi
+        
+        absolute_path=$(pwd)
+        echo "Absolute working directory path: $absolute_path"
+        
+        # Store absolute path for later steps
+        echo "SCIP_WORKING_DIR=$absolute_path" >> $GITHUB_ENV
+        echo "Working directory set to: $absolute_path"
+        
+        # Verify the environment variable will be set
+        echo "Environment variable SCIP_WORKING_DIR will be set to: $absolute_path"
+
+    # =============================================================================
+    # PROJECT DISCOVERY
+    # =============================================================================
+
     - name: Get changed files
       id: changed-files
       uses: tj-actions/changed-files@v44
       with:
         files: |
-          **/*.{go,ts,tsx,js,jsx,py,java,scala,kt}
-          **/go.mod
-          **/package.json
-          **/setup.py
-          **/pyproject.toml
-          **/requirements.txt
-          **/Pipfile
-          **/pom.xml
-          **/build.gradle
-          **/build.gradle.kts
+          ${{ inputs.working-directory }}/**/*.{go,ts,tsx,js,jsx,py,java,scala,kt}
+          ${{ inputs.working-directory }}/**/go.mod
+          ${{ inputs.working-directory }}/**/package.json
+          ${{ inputs.working-directory }}/**/setup.py
+          ${{ inputs.working-directory }}/**/pyproject.toml
+          ${{ inputs.working-directory }}/**/requirements.txt
+          ${{ inputs.working-directory }}/**/Pipfile
+          ${{ inputs.working-directory }}/**/pom.xml
+          ${{ inputs.working-directory }}/**/build.gradle
+          ${{ inputs.working-directory }}/**/build.gradle.kts
+      continue-on-error: true
 
-    - name: Find changed project directories
+    - name: Find changed projects
       id: find-projects
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       run: |
-        echo "=== Finding projects with changed files ==="
+        echo "=== Finding projects with changes ==="
         
+        cd "$SCIP_WORKING_DIR"
         changed_files="${{ steps.changed-files.outputs.all_changed_files }}"
+        changed_files_success="${{ steps.changed-files.outcome }}"
         
-        if [[ -z "$changed_files" ]]; then
-          echo "No relevant files changed"
-          echo "changed_projects=" >> "$GITHUB_OUTPUT"
-          echo "project_count=0" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        
-        # Function to find project root
-        find_project_root() {
-          local file_path="$1"
-          local dir
-          dir=$(dirname "$file_path")
-          
-          while [[ "$dir" != "." && "$dir" != "/" ]]; do
-            if [[ -f "$dir/go.mod" || -f "$dir/package.json" || -f "$dir/setup.py" || \
-                  -f "$dir/pyproject.toml" || -f "$dir/pom.xml" || \
-                  -f "$dir/build.gradle" || -f "$dir/build.gradle.kts" ]]; then
-              echo "$dir"
-              return 0
-            fi
-            dir=$(dirname "$dir")
-          done
-          
-          # Check root directory
-          if [[ -f "./go.mod" || -f "./package.json" || -f "./setup.py" || \
-                -f "./pyproject.toml" || -f "./pom.xml" || \
-                -f "./build.gradle" || -f "./build.gradle.kts" ]]; then
-            echo "."
-          fi
-        }
-        
-        # Find unique project directories
-        declare -A seen_dirs
         project_dirs=()
         
-        for file in $changed_files; do
-          project_root=$(find_project_root "$file")
-          if [[ -n "$project_root" && -z "${seen_dirs[$project_root]}" ]]; then
-            seen_dirs["$project_root"]=1
-            project_dirs+=("$project_root")
-            echo "Found project: $project_root (from file: $file)"
+        if [[ "$changed_files_success" == "success" && -n "$changed_files" ]]; then
+          echo "Using Git-based change detection"
+          echo "Changed files: $changed_files"
+          
+          declare -A seen_dirs
+          
+          for file in $changed_files; do
+            # Remove working directory prefix from file path
+            relative_file="${file#${{ inputs.working-directory }}/}"
+            project_root=$(find_project_root "$relative_file")
+            
+            if [[ -n "$project_root" && -z "${seen_dirs[$project_root]}" ]]; then
+              seen_dirs["$project_root"]=1
+              project_dirs+=("$project_root")
+              echo "Found project: $project_root (from file: $file)"
+            fi
+          done
+        else
+          echo "Git change detection failed or no changes. Scanning all projects..."
+          
+          while IFS= read -r -d '' project_file; do
+            project_dir=$(dirname "$project_file")
+            project_dir=$(realpath --relative-to="$PWD" "$project_dir" 2>/dev/null || dirname "$project_file")
+            project_dirs+=("$project_dir")
+            echo "Found project: $project_dir"
+          done < <(find . -type f \( \
+            -name "go.mod" -o \
+            -name "package.json" -o \
+            -name "setup.py" -o \
+            -name "pyproject.toml" -o \
+            -name "pom.xml" -o \
+            -name "build.gradle" -o \
+            -name "build.gradle.kts" \
+          \) -print0 2>/dev/null)
+          
+          # Remove duplicates
+          if [[ ${#project_dirs[@]} -gt 0 ]]; then
+            IFS=$'\n' project_dirs=($(printf '%s\n' "${project_dirs[@]}" | sort -u))
           fi
-        done
+        fi
         
         project_count=${#project_dirs[@]}
-        echo "Total projects: $project_count"
+        echo "Total projects found: $project_count"
         
         # Export results
         if [[ $project_count -gt 0 ]]; then
@@ -138,235 +173,229 @@ runs:
         fi
         
         echo "project_count=$project_count" >> "$GITHUB_OUTPUT"
-
-    - name: Process Go projects
-      if: steps.find-projects.outputs.project_count > 0
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        results_file=$(mktemp)
-        echo "0" > "$results_file.success"
-        echo "0" > "$results_file.total"
-        echo "" > "$results_file.failed"
         
-        echo "${{ steps.find-projects.outputs.changed_projects }}" | while IFS= read -r project_dir; do
-          [[ -z "$project_dir" ]] && continue
+        # Helper function for finding project roots
+        find_project_root() {
+          local file_path="$1"
+          local dir=$(dirname "$file_path")
           
-          if [[ -f "$project_dir/go.mod" ]]; then
-            echo "Processing Go project: $project_dir"
-            cd "$project_dir"
-            
-            total_count=$(cat "$results_file.total")
-            echo $((total_count + 1)) > "$results_file.total"
-            
-            if scip-go --output=index.scip 2>/dev/null; then
-              echo "✅ Generated Go SCIP index for $project_dir"
-              success_count=$(cat "$results_file.success")
-              echo $((success_count + 1)) > "$results_file.success"
-            else
-              echo "❌ Failed to generate Go SCIP index for $project_dir"
-              echo "- $project_dir (Go)" >> "$results_file.failed"
+          while [[ "$dir" != "." && "$dir" != "/" && -n "$dir" ]]; do
+            if [[ -f "$dir/go.mod" || -f "$dir/package.json" || -f "$dir/setup.py" || \
+                  -f "$dir/pyproject.toml" || -f "$dir/pom.xml" || \
+                  -f "$dir/build.gradle" || -f "$dir/build.gradle.kts" ]]; then
+              echo "$dir"
+              return 0
             fi
-            
-            cd - > /dev/null
+            dir=$(dirname "$dir")
+          done
+          
+          # Check current directory
+          if [[ -f "./go.mod" || -f "./package.json" || -f "./setup.py" || \
+                -f "./pyproject.toml" || -f "./pom.xml" || \
+                -f "./build.gradle" || -f "./build.gradle.kts" ]]; then
+            echo "."
           fi
-        done
+        }
 
-    - name: Process Node.js/TypeScript projects
-      if: steps.find-projects.outputs.project_count > 0
+    # =============================================================================
+    # SCIP INDEX GENERATION
+    # =============================================================================
+
+    - name: Generate SCIP indexes
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
+      if: steps.find-projects.outputs.project_count > 0
       run: |
-        results_file=$(mktemp)
-        [[ ! -f "$results_file.success" ]] && echo "0" > "$results_file.success"
-        [[ ! -f "$results_file.total" ]] && echo "0" > "$results_file.total"
-        [[ ! -f "$results_file.failed" ]] && echo "" > "$results_file.failed"
+        set +e  # Don't exit on errors, we want to continue processing other projects
         
-        echo "${{ steps.find-projects.outputs.changed_projects }}" | while IFS= read -r project_dir; do
+        echo "=== Generating SCIP indexes for ${{ steps.find-projects.outputs.project_count }} projects ==="
+        
+        # Debug environment
+        echo "SCIP_WORKING_DIR: '$SCIP_WORKING_DIR'"
+        
+        # Determine working directory with fallback
+        if [[ -n "$SCIP_WORKING_DIR" && -d "$SCIP_WORKING_DIR" ]]; then
+          working_dir="$SCIP_WORKING_DIR"
+        elif [[ "${{ inputs.working-directory }}" != "." ]]; then
+          working_dir="${{ inputs.working-directory }}"
+        else
+          working_dir="$(pwd)"
+        fi
+        
+        if ! cd "$working_dir"; then
+          echo "❌ Cannot access working directory: $working_dir"
+          exit 1
+        fi
+        
+        echo "Processing projects in: $(pwd)"
+        
+        # Initialize result tracking files
+        echo "0" > /tmp/scip_success_count
+        echo "0" > /tmp/scip_total_count
+        echo "" > /tmp/scip_failed_projects
+        
+        # Use process substitution instead of pipe to avoid subshell
+        while IFS= read -r project_dir; do
           [[ -z "$project_dir" ]] && continue
           
-          if [[ -f "$project_dir/package.json" ]]; then
-            echo "Processing Node.js/TypeScript project: $project_dir"
-            cd "$project_dir"
+          echo "Processing project: $project_dir"
+          
+          if [[ ! -d "$working_dir/$project_dir" ]]; then
+            echo "❌ Project directory does not exist: $project_dir"
+            echo "$project_dir (directory not found)" >> /tmp/scip_failed_projects
+            continue
+          fi
+          
+          cd "$working_dir/$project_dir" || {
+            echo "❌ Cannot access project directory: $project_dir"
+            echo "$project_dir (inaccessible)" >> /tmp/scip_failed_projects
+            continue
+          }
+          
+          echo "  Working in: $(pwd)"
+          project_processed=false
+          
+          # Go projects
+          if [[ -f "go.mod" ]]; then
+            echo "  → Go project detected"
+            current_total=$(cat /tmp/scip_total_count)
+            echo $((current_total + 1)) > /tmp/scip_total_count
             
-            total_count=$(cat "$results_file.total")
-            echo $((total_count + 1)) > "$results_file.total"
+            echo "  → Running: scip-go --output=index.scip"
+            if scip-go --output=index.scip; then
+              echo "  ✅ Go SCIP index generated"
+              current_success=$(cat /tmp/scip_success_count)
+              echo $((current_success + 1)) > /tmp/scip_success_count
+              project_processed=true
+            else
+              echo "  ❌ Go SCIP index failed (exit code: $?)"
+              echo "$project_dir (Go)" >> /tmp/scip_failed_projects
+            fi
+          fi
+          
+          # TypeScript/Node.js projects
+          if [[ -f "package.json" ]]; then
+            echo "  → TypeScript/Node.js project detected"
+            current_total=$(cat /tmp/scip_total_count)
+            echo $((current_total + 1)) > /tmp/scip_total_count
             
             # Install dependencies unless skipped
-            if [[ "${{ inputs.skip-dependency-install }}" != "true" ]]; then
-              if [[ -f "package-lock.json" ]]; then
-                npm ci --silent
-              elif [[ -f "yarn.lock" ]]; then
-                yarn install --frozen-lockfile --silent
-              elif [[ -f "pnpm-lock.yaml" ]]; then
-                pnpm install --frozen-lockfile --silent
-              else
-                npm install --silent
-              fi
-            fi
-            
-            if scip-typescript index --output=index.scip 2>/dev/null; then
-              echo "✅ Generated TypeScript SCIP index for $project_dir"
-              success_count=$(cat "$results_file.success")
-              echo $((success_count + 1)) > "$results_file.success"
+            echo "  → Installing dependencies..."
+            if [[ -f "package-lock.json" ]]; then
+              npm ci --silent || echo "  ⚠️ npm ci failed"
+            elif [[ -f "yarn.lock" ]]; then
+              yarn install --frozen-lockfile --silent || echo "  ⚠️ yarn install failed"
+            elif [[ -f "pnpm-lock.yaml" ]]; then
+              pnpm install --frozen-lockfile --silent || echo "  ⚠️ pnpm install failed"
             else
-              echo "❌ Failed to generate TypeScript SCIP index for $project_dir"
-              echo "- $project_dir (TypeScript)" >> "$results_file.failed"
+              npm install --silent || echo "  ⚠️ npm install failed"
             fi
             
-            cd - > /dev/null
+            echo "  → Running: scip-typescript index --output=index.scip"
+            if scip-typescript index --output=index.scip; then
+              echo "  ✅ TypeScript SCIP index generated"
+              current_success=$(cat /tmp/scip_success_count)
+              echo $((current_success + 1)) > /tmp/scip_success_count
+              project_processed=true
+            else
+              echo "  ❌ TypeScript SCIP index failed (exit code: $?)"
+              echo "$project_dir (TypeScript)" >> /tmp/scip_failed_projects
+            fi
           fi
-        done
-
-    - name: Process Python projects
-      if: steps.find-projects.outputs.project_count > 0
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        results_file=$(mktemp)
-        [[ ! -f "$results_file.success" ]] && echo "0" > "$results_file.success"
-        [[ ! -f "$results_file.total" ]] && echo "0" > "$results_file.total"
-        [[ ! -f "$results_file.failed" ]] && echo "" > "$results_file.failed"
-        
-        echo "${{ steps.find-projects.outputs.changed_projects }}" | while IFS= read -r project_dir; do
-          [[ -z "$project_dir" ]] && continue
           
-          if [[ -f "$project_dir/setup.py" || -f "$project_dir/pyproject.toml" || \
-                -f "$project_dir/requirements.txt" || -f "$project_dir/Pipfile" ]]; then
-            echo "Processing Python project: $project_dir"
-            cd "$project_dir"
-            
-            total_count=$(cat "$results_file.total")
-            echo $((total_count + 1)) > "$results_file.total"
+          # Python projects
+          if [[ -f "setup.py" || -f "pyproject.toml" || -f "requirements.txt" || -f "Pipfile" ]]; then
+            echo "  → Python project detected"
+            current_total=$(cat /tmp/scip_total_count)
+            echo $((current_total + 1)) > /tmp/scip_total_count
             
             # Install dependencies unless skipped
-            if [[ "${{ inputs.skip-dependency-install }}" != "true" ]]; then
-              if [[ -f "requirements.txt" ]]; then
-                pip3 install -q -r requirements.txt || true
-              elif [[ -f "pyproject.toml" ]]; then
-                pip3 install -q . || true
-              fi
+            echo "  → Installing Python dependencies..."
+            if [[ -f "requirements.txt" ]]; then
+              pip3 install -q -r requirements.txt || echo "  ⚠️ pip install failed"
+            elif [[ -f "pyproject.toml" ]]; then
+              pip3 install -q . || echo "  ⚠️ pip install failed"
             fi
             
-            if scip-python index --output=index.scip 2>/dev/null; then
-              echo "✅ Generated Python SCIP index for $project_dir"
-              success_count=$(cat "$results_file.success")
-              echo $((success_count + 1)) > "$results_file.success"
+            echo "  → Running: scip-python index --output=index.scip"
+            if scip-python index --output=index.scip; then
+              echo "  ✅ Python SCIP index generated"
+              current_success=$(cat /tmp/scip_success_count)
+              echo $((current_success + 1)) > /tmp/scip_success_count
+              project_processed=true
             else
-              echo "❌ Failed to generate Python SCIP index for $project_dir"
-              echo "- $project_dir (Python)" >> "$results_file.failed"
+              echo "  ❌ Python SCIP index failed (exit code: $?)"
+              echo "$project_dir (Python)" >> /tmp/scip_failed_projects
             fi
-            
-            cd - > /dev/null
           fi
-        done
-
-    - name: Process Java projects
-      if: steps.find-projects.outputs.project_count > 0
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      run: |
-        results_file=$(mktemp)
-        [[ ! -f "$results_file.success" ]] && echo "0" > "$results_file.success"
-        [[ ! -f "$results_file.total" ]] && echo "0" > "$results_file.total"
-        [[ ! -f "$results_file.failed" ]] && echo "" > "$results_file.failed"
-        
-        echo "${{ steps.find-projects.outputs.changed_projects }}" | while IFS= read -r project_dir; do
-          [[ -z "$project_dir" ]] && continue
           
-          if [[ -f "$project_dir/pom.xml" || -f "$project_dir/build.gradle" || \
-                -f "$project_dir/build.gradle.kts" ]]; then
-            echo "Processing Java project: $project_dir"
-            cd "$project_dir"
+          # Java projects
+          if [[ -f "pom.xml" || -f "build.gradle" || -f "build.gradle.kts" ]]; then
+            echo "  → Java project detected"
+            current_total=$(cat /tmp/scip_total_count)
+            echo $((current_total + 1)) > /tmp/scip_total_count
             
-            total_count=$(cat "$results_file.total")
-            echo $((total_count + 1)) > "$results_file.total"
-            
-            if scip-java index --output=index.scip 2>/dev/null; then
-              echo "✅ Generated Java SCIP index for $project_dir"
-              success_count=$(cat "$results_file.success")
-              echo $((success_count + 1)) > "$results_file.success"
+            echo "  → Running: scip-java index --output=index.scip"
+            if scip-java index --output=index.scip; then
+              echo "  ✅ Java SCIP index generated"
+              current_success=$(cat /tmp/scip_success_count)
+              echo $((current_success + 1)) > /tmp/scip_success_count
+              project_processed=true
             else
-              echo "❌ Failed to generate Java SCIP index for $project_dir"
+              echo "  ❌ Java SCIP index failed (exit code: $?)"
               project_type="Maven"
               [[ -f "build.gradle" || -f "build.gradle.kts" ]] && project_type="Gradle"
-              echo "- $project_dir ($project_type)" >> "$results_file.failed"
+              echo "$project_dir ($project_type)" >> /tmp/scip_failed_projects
             fi
-            
-            cd - > /dev/null
           fi
-        done
+          
+          if [[ "$project_processed" == false ]]; then
+            echo "  ⚠️  No supported project files found in $project_dir"
+            ls -la || echo "  Cannot list directory contents"
+          fi
+          
+         cd "$working_dir" || {
+           echo "  ⚠️ Failed to return to working directory, but continuing..."
+         }
+        done < <(echo "${{ steps.find-projects.outputs.changed_projects }}")
+        
+        # Always exit successfully from this step, even if individual projects failed
+        exit 0
 
-    - name: Collect and process results
-      id: process-results
+    # =============================================================================
+    # RESULTS COLLECTION AND OUTPUT
+    # =============================================================================
+
+    - name: Collect results
+      id: collect-results
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       run: |
+        # Determine working directory
+        if [[ -n "$SCIP_WORKING_DIR" && -d "$SCIP_WORKING_DIR" ]]; then
+          working_dir="$SCIP_WORKING_DIR"
+        elif [[ "${{ inputs.working-directory }}" != "." ]]; then
+          working_dir="${{ inputs.working-directory }}"
+        else
+          working_dir="$(pwd)"
+        fi
+        
+        cd "$working_dir" || exit 1
+        
         if [[ "${{ steps.find-projects.outputs.project_count }}" -eq 0 ]]; then
           echo "success_count=0" >> "$GITHUB_OUTPUT"
-          echo "total_count=0" >> "$GITHUB_OUTPUT"
-          echo "failed_projects=" >> "$GITHUB_OUTPUT"
           echo "skipped=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         
-        # Collect results from all processing steps (simplified)
+        # Find and list all generated SCIP indexes
+        echo "=== Generated SCIP Indexes ==="
         success_count=0
-        total_count=0
-        failed_projects=""
+        find . -name "index.scip" -type f | while read -r scip_file; do
+          echo "$scip_file"
+          success_count=$((success_count + 1))
+        done
         
-        # Count generated indexes and collect stats
-        while IFS= read -r scip_file; do
-          [[ -z "$scip_file" ]] && continue
-          ((success_count++))
-          dir=$(dirname "$scip_file")
-          echo "Found index: $dir"
-        done < <(find . -name "index.scip" -type f 2>/dev/null)
+        # Count files for output
+        actual_count=$(find . -name "index.scip" -type f | wc -l)
         
-        # For simplicity, assume total_count equals success_count for now
-        # In a real implementation, you'd track this across all steps
-        total_count=$success_count
-        
-        echo "success_count=$success_count" >> "$GITHUB_OUTPUT"
-        echo "total_count=$total_count" >> "$GITHUB_OUTPUT"
-        echo "failed_projects=$failed_projects" >> "$GITHUB_OUTPUT"
+        echo "success_count=$actual_count" >> "$GITHUB_OUTPUT"
         echo "skipped=false" >> "$GITHUB_OUTPUT"
-
-    - name: Create PR comment
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const successCount = '${{ steps.process-results.outputs.success_count }}';
-          const totalCount = '${{ steps.process-results.outputs.total_count }}';
-          const skipped = '${{ steps.process-results.outputs.skipped }}' === 'true';
-          const projectCount = '${{ steps.find-projects.outputs.project_count }}';
-          
-          const status = skipped ? '⚪ Skipped' : 
-                        successCount == totalCount ? '✅ Success' : '⚠️ Partial';
-          
-          const comment = `## 🔍 SCIP Index Generation Results
-          
-          **Status:** ${status}
-          
-          ### Summary
-          - **Changed projects:** ${projectCount}
-          - **Indexes generated:** ${successCount}${totalCount > 0 ? `/${totalCount}` : ''}
-          - **Commit:** \`${{ github.event.pull_request.head.sha }}\`
-          
-          ${skipped ? 'No projects with source code changes detected.' : ''}
-          
-          <details>
-          <summary>Workflow Details</summary>
-          
-          - **Run:** [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-          - **Actor:** @${{ github.actor }}
-          
-          </details>`;
-                    
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: comment
-          });

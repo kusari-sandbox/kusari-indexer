@@ -20,15 +20,10 @@ jobs:
     strategy:
       matrix:
         test-scenario:
-          - name: "all-languages"
-            description: "Test all supported languages"
-            skip-deps: false
-          - name: "skip-dependencies" 
-            description: "Test with dependency installation skipped"
-            skip-deps: true
+          - name: "real-projects"
+            description: "Test with real open source projects"
           - name: "no-changes"
             description: "Test with no relevant file changes"
-            skip-deps: false
 
     steps:
     - name: Checkout repository
@@ -38,6 +33,7 @@ jobs:
         persist-credentials: false
 
     - name: Verify SCIP tools are available
+      shell: bash
       run: |
         echo "=== Verifying SCIP tools in container ==="
         for tool in scip-go scip-typescript scip-python scip-java; do
@@ -50,384 +46,153 @@ jobs:
           fi
         done
 
-    - name: Create Go test project
+    - name: Clone real test projects
       if: matrix.test-scenario.name != 'no-changes'
+      shell: bash
       run: |
-        mkdir -p test-projects/go-app
-        cat > test-projects/go-app/go.mod << 'EOF'
-        module example.com/test-app
-
-        go 1.21
-
-        require github.com/gorilla/mux v1.8.0
-        EOF
+        echo "=== Cloning real open source projects for testing ==="
+        mkdir -p test-projects
+        cd test-projects
         
-        cat > test-projects/go-app/go.sum << 'EOF'
-        github.com/gorilla/mux v1.8.0 h1:i40aqfkR1h2SlN9hojwV5ZA91wcXFOvJlDzI8oJk6E4=
-        github.com/gorilla/mux v1.8.0/go.mod h1:DVbg23sWSpFRCP0SfiEN6jmj59UnW/n46BH5rLB71So=
-        EOF
+        # Go project - fatih/color (terminal colors library)
+        echo "Cloning Go project: fatih/color"
+        git clone --depth 1 https://github.com/fatih/color.git go-project
+        
+        # TypeScript project - sindresorhus/is (type checking utilities)
+        echo "Cloning TypeScript project: sindresorhus/is"
+        git clone --depth 1 https://github.com/sindresorhus/is.git typescript-project
+        
+        # Python project - psf/black (Python code formatter)
+        echo "Cloning Python project: psf/black"
+        git clone --depth 1 https://github.com/psf/black.git python-project
+        
+        # Create minimal Java project for testing (avoids complex build issues)
+        echo "Creating minimal Java project for testing"
+        mkdir -p java-project/src/main/java/com/test
 
-    - name: Create Go source files
+    - name: Create Java test project
       if: matrix.test-scenario.name != 'no-changes'
+      shell: bash
       run: |
-        cat > test-projects/go-app/main.go << 'EOF'
-        package main
-
-        import (
-            "fmt"
-            "log"
-            "net/http"
-            "github.com/gorilla/mux"
-        )
-
-        type Server struct {
-            router *mux.Router
-        }
-
-        func NewServer() *Server {
-            s := &Server{router: mux.NewRouter()}
-            s.routes()
-            return s
-        }
-
-        func (s *Server) routes() {
-            s.router.HandleFunc("/", s.handleHome()).Methods("GET")
-            s.router.HandleFunc("/users/{id}", s.handleUserByID()).Methods("GET")
-        }
-
-        func (s *Server) handleHome() http.HandlerFunc {
-            return func(w http.ResponseWriter, r *http.Request) {
-                fmt.Fprintf(w, "Hello, SCIP!")
-            }
-        }
-
-        func (s *Server) handleUserByID() http.HandlerFunc {
-            return func(w http.ResponseWriter, r *http.Request) {
-                vars := mux.Vars(r)
-                id := vars["id"]
-                fmt.Fprintf(w, `{"user_id": "%s"}`, id)
-            }
-        }
-
-        func main() {
-            server := NewServer()
-            log.Println("Server starting on :8080")
-            log.Fatal(http.ListenAndServe(":8080", server.router))
-        }
-        EOF
-
-    - name: Create TypeScript project structure
-      if: matrix.test-scenario.name != 'no-changes'
-      run: |
-        mkdir -p test-projects/ts-app/src
-        cat > test-projects/ts-app/package.json << 'EOF'
-        {
-          "name": "test-ts-app",
-          "version": "1.0.0",
-          "main": "dist/index.js",
-          "scripts": {
-            "build": "tsc"
-          },
-          "dependencies": {
-            "express": "^4.18.2"
-          },
-          "devDependencies": {
-            "@types/express": "^4.17.17",
-            "@types/node": "^20.5.0",
-            "typescript": "^5.0.0"
-          }
-        }
-        EOF
-        
-        cat > test-projects/ts-app/tsconfig.json << 'EOF'
-        {
-          "compilerOptions": {
-            "target": "ES2020",
-            "module": "commonjs",
-            "outDir": "./dist",
-            "rootDir": "./src",
-            "strict": true,
-            "esModuleInterop": true
-          }
-        }
-        EOF
-
-    - name: Create TypeScript source files
-      if: matrix.test-scenario.name != 'no-changes'
-      run: |
-        cat > test-projects/ts-app/src/types.ts << 'EOF'
-        export interface User {
-          id: number;
-          name: string;
-          email: string;
-        }
-
-        export interface ApiResponse<T> {
-          success: boolean;
-          data: T;
-        }
-        EOF
-        
-        cat > test-projects/ts-app/src/userService.ts << 'EOF'
-        import { User, ApiResponse } from './types';
-
-        export class UserService {
-          private users: User[] = [
-            { id: 1, name: 'John', email: 'john@test.com' },
-            { id: 2, name: 'Jane', email: 'jane@test.com' }
-          ];
-
-          getAllUsers(): ApiResponse<User[]> {
-            return { success: true, data: this.users };
-          }
-
-          getUserById(id: number): ApiResponse<User | null> {
-            const user = this.users.find(u => u.id === id);
-            return { success: !!user, data: user || null };
-          }
-        }
-        EOF
-        
-        cat > test-projects/ts-app/src/index.ts << 'EOF'
-        import express from 'express';
-        import { UserService } from './userService';
-
-        const app = express();
-        const userService = new UserService();
-
-        app.get('/', (req, res) => {
-          res.json({ message: 'Hello SCIP TypeScript!' });
-        });
-
-        app.get('/users', (req, res) => {
-          const result = userService.getAllUsers();
-          res.json(result);
-        });
-
-        app.listen(3000, () => console.log('Server running'));
-        EOF
-
-    - name: Create Python project structure
-      if: matrix.test-scenario.name != 'no-changes'
-      run: |
-        mkdir -p test-projects/python-app/src/myapp
-        cat > test-projects/python-app/pyproject.toml << 'EOF'
-        [build-system]
-        requires = ["setuptools>=61.0"]
-        build-backend = "setuptools.build_meta"
-
-        [project]
-        name = "test-python-app"
-        version = "1.0.0"
-        dependencies = [
-            "fastapi>=0.100.0",
-            "uvicorn>=0.23.0",
-            "pydantic>=2.0.0"
-        ]
-        EOF
-        
-        cat > test-projects/python-app/requirements.txt << 'EOF'
-        fastapi>=0.100.0
-        uvicorn>=0.23.0
-        pydantic>=2.0.0
-        EOF
-
-    - name: Create Python source files
-      if: matrix.test-scenario.name != 'no-changes'
-      run: |
-        cat > test-projects/python-app/src/myapp/__init__.py << 'EOF'
-        """Test Python app for SCIP."""
-        __version__ = "1.0.0"
-        EOF
-        
-        cat > test-projects/python-app/src/myapp/models.py << 'EOF'
-        from typing import List
-        from pydantic import BaseModel, EmailStr
-
-        class UserBase(BaseModel):
-            name: str
-            email: EmailStr
-
-        class UserCreate(UserBase):
-            pass
-
-        class UserResponse(UserBase):
-            id: int
-
-            class Config:
-                from_attributes = True
-        EOF
-        
-        cat > test-projects/python-app/src/myapp/main.py << 'EOF'
-        from typing import List
-        from fastapi import FastAPI
-        from myapp.models import UserCreate, UserResponse
-
-        app = FastAPI(title="Test SCIP Python App")
-
-        users_db = [
-            {"id": 1, "name": "Alice", "email": "alice@test.com"},
-            {"id": 2, "name": "Bob", "email": "bob@test.com"}
-        ]
-
-        @app.get("/")
-        async def root():
-            return {"message": "Hello SCIP Python!"}
-
-        @app.get("/users", response_model=List[UserResponse])
-        async def get_users():
-            return users_db
-
-        @app.post("/users", response_model=UserResponse)
-        async def create_user(user: UserCreate):
-            new_id = max(u["id"] for u in users_db) + 1
-            new_user = {"id": new_id, **user.dict()}
-            users_db.append(new_user)
-            return new_user
-        EOF
-
-    - name: Create Java project structure
-      if: matrix.test-scenario.name != 'no-changes'
-      run: |
-        mkdir -p test-projects/java-app/src/main/java/com/example
-        cat > test-projects/java-app/pom.xml << 'EOF'
+        cd test-projects
+        cat > java-project/pom.xml << 'EOF'
         <?xml version="1.0" encoding="UTF-8"?>
         <project xmlns="http://maven.apache.org/POM/4.0.0"
                  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
-                 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+                 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
             <modelVersion>4.0.0</modelVersion>
-            
-            <groupId>com.example</groupId>
-            <artifactId>test-java-app</artifactId>
-            <version>1.0.0</version>
-            
+            <groupId>com.test</groupId>
+            <artifactId>scip-test-project</artifactId>
+            <version>1.0-SNAPSHOT</version>
             <properties>
-                <maven.compiler.source>17</maven.compiler.source>
-                <maven.compiler.target>17</maven.compiler.target>
+                <maven.compiler.source>11</maven.compiler.source>
+                <maven.compiler.target>11</maven.compiler.target>
                 <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
             </properties>
-            
             <dependencies>
                 <dependency>
                     <groupId>com.fasterxml.jackson.core</groupId>
-                    <artifactId>jackson-databind</artifactId>
+                    <artifactId>jackson-core</artifactId>
                     <version>2.15.2</version>
-                </dependency>
-                <dependency>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-simple</artifactId>
-                    <version>2.0.7</version>
                 </dependency>
             </dependencies>
         </project>
         EOF
-
-    - name: Create Java source files
-      if: matrix.test-scenario.name != 'no-changes'
-      run: |
-        cat > test-projects/java-app/src/main/java/com/example/User.java << 'EOF'
-        package com.example;
-
-        import com.fasterxml.jackson.annotation.JsonProperty;
-
-        public class User {
-            @JsonProperty("id")
-            private Long id;
-            
-            @JsonProperty("name")
-            private String name;
-            
-            @JsonProperty("email")
-            private String email;
-
-            public User() {}
-
-            public User(Long id, String name, String email) {
-                this.id = id;
-                this.name = name;
-                this.email = email;
-            }
-
-            public Long getId() { return id; }
-            public void setId(Long id) { this.id = id; }
-            
-            public String getName() { return name; }
-            public void setName(String name) { this.name = name; }
-            
-            public String getEmail() { return email; }
-            public void setEmail(String email) { this.email = email; }
-
-            @Override
-            public String toString() {
-                return "User{id=" + id + ", name='" + name + "', email='" + email + "'}";
-            }
-        }
-        EOF
         
-        cat > test-projects/java-app/src/main/java/com/example/UserService.java << 'EOF'
-        package com.example;
-
-        import org.slf4j.Logger;
-        import org.slf4j.LoggerFactory;
+        cat > java-project/src/main/java/com/test/TestService.java << 'EOF'
+        package com.test;
+        
+        import com.fasterxml.jackson.core.JsonFactory;
+        import com.fasterxml.jackson.core.JsonParser;
+        import java.io.IOException;
         import java.util.List;
         import java.util.ArrayList;
-
-        public class UserService {
-            private static final Logger logger = LoggerFactory.getLogger(UserService.class);
-            private List<User> users = new ArrayList<>();
-
-            public UserService() {
-                users.add(new User(1L, "Alice", "alice@test.com"));
-                users.add(new User(2L, "Bob", "bob@test.com"));
-            }
-
-            public List<User> getAllUsers() {
-                logger.info("Getting all users");
-                return new ArrayList<>(users);
-            }
-
-            public User createUser(String name, String email) {
-                Long id = (long) (users.size() + 1);
-                User user = new User(id, name, email);
-                users.add(user);
-                logger.info("Created user: {}", user);
-                return user;
-            }
-        }
-        EOF
         
-        cat > test-projects/java-app/src/main/java/com/example/Main.java << 'EOF'
-        package com.example;
-
-        import com.fasterxml.jackson.databind.ObjectMapper;
-        import org.slf4j.Logger;
-        import org.slf4j.LoggerFactory;
-
-        public class Main {
-            private static final Logger logger = LoggerFactory.getLogger(Main.class);
-
-            public static void main(String[] args) {
-                logger.info("Starting Test Java App for SCIP indexing");
-
+        public class TestService {
+            private final JsonFactory jsonFactory;
+            private List<String> items;
+            
+            public TestService() {
+                this.jsonFactory = new JsonFactory();
+                this.items = new ArrayList<>();
+            }
+            
+            public void addItem(String item) {
+                items.add(item);
+            }
+            
+            public List<String> getItems() {
+                return new ArrayList<>(items);
+            }
+            
+            public JsonParser createParser(String json) throws IOException {
+                return jsonFactory.createParser(json);
+            }
+            
+            public void processData(String data) {
                 try {
-                    UserService service = new UserService();
-                    ObjectMapper mapper = new ObjectMapper();
-
-                    String json = mapper.writeValueAsString(service.getAllUsers());
-                    logger.info("Users JSON: {}", json);
-
-                    service.createUser("Charlie", "charlie@test.com");
-                } catch (Exception e) {
-                    logger.error("Error", e);
+                    JsonParser parser = createParser(data);
+                    addItem("Processed: " + data);
+                } catch (IOException e) {
+                    addItem("Error: " + e.getMessage());
                 }
             }
         }
         EOF
+        
+        cat > java-project/src/main/java/com/test/Main.java << 'EOF'
+        package com.test;
+        
+        public class Main {
+            public static void main(String[] args) {
+                TestService service = new TestService();
+                service.addItem("Hello, World!");
+                service.processData("{\"name\":\"test\"}");
+                
+                System.out.println("Items: " + service.getItems());
+            }
+        }
+        EOF
+
+    - name: Install Java build tools
+      if: matrix.test-scenario.name != 'no-changes'
+      shell: bash
+      run: |
+        echo "=== Installing Java build tools for testing ==="
+        
+        # Update package list
+        apt-get update
+        
+        # Install prerequisites
+        apt-get install -y wget unzip curl gnupg
+        
+        # Install Maven
+        echo "Installing Maven..."
+        apt-get install -y maven
+        
+        # Install Gradle
+        echo "Installing Gradle..."
+        wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip -O /tmp/gradle.zip
+        unzip -q /tmp/gradle.zip -d /opt
+        rm /tmp/gradle.zip
+        ln -sf /opt/gradle-8.5/bin/gradle /usr/local/bin/gradle
+        chmod +x /opt/gradle-8.5/bin/gradle
+        
+        # Clean up
+        rm -rf /var/lib/apt/lists/*
+        
+        # Verify installations
+        echo "=== Build Tool Versions ==="
+        java -version
+        echo "Maven:" && mvn --version | head -n 1
+        echo "Gradle:" && gradle --version | head -n 1
+        echo "=== All tools installed successfully ==="
 
     - name: Create test project with no relevant changes
       if: matrix.test-scenario.name == 'no-changes'
+      shell: bash
       run: |
+        echo "=== Creating test project structure with no relevant changes ==="
         mkdir -p test-projects/docs-only
         cat > test-projects/docs-only/README.md << 'EOF'
         # Documentation Project
@@ -439,175 +204,57 @@ jobs:
         ## v1.0.0
         - Initial documentation
         EOF
-
-    - name: Simulate file changes for testing
-      if: matrix.test-scenario.name != 'no-changes'
-      run: |
-        echo "=== Simulating file changes ==="
-        touch test-projects/go-app/main.go
-        touch test-projects/ts-app/src/index.ts
-        touch test-projects/python-app/src/myapp/main.py
-        touch test-projects/java-app/src/main/java/com/example/Main.java
         
-        echo "Files that should be detected as changed:"
-        find test-projects -name "*.go" -o -name "*.ts" -o -name "*.py" -o -name "*.java" | head -10
+        echo "Created test-projects directory structure:"
+        ls -la test-projects/ || echo "test-projects directory not found"
 
-    - name: List created projects
+    - name: Show project structure
       if: matrix.test-scenario.name != 'no-changes'
+      shell: bash
       run: |
-        echo "=== Created test projects ==="
-        find test-projects -type f \( -name "go.mod" -o -name "package.json" -o -name "*.toml" -o -name "pom.xml" \) | sort
+        echo "=== Project structure ==="
+        find test-projects -maxdepth 2 -name "*.mod" -o -name "package.json" -o -name "setup.py" -o -name "pyproject.toml" -o -name "pom.xml" -o -name "build.gradle*" | head -20
 
     - name: Test the SCIP action
       id: test-action
       uses: ./
       with:
         working-directory: test-projects
-        skip-dependency-install: ${{ matrix.test-scenario.skip-deps }}
 
     - name: Verify action outputs
+      shell: bash
       run: |
         echo "=== Action Outputs ==="
         echo "Success count: '${{ steps.test-action.outputs.success-count }}'"
-        echo "Total count: '${{ steps.test-action.outputs.total-count }}'"
         echo "Skipped: '${{ steps.test-action.outputs.skipped }}'"
-        echo "Failed projects: '${{ steps.test-action.outputs.failed-projects }}'"
-        echo "Changed projects: '${{ steps.test-action.outputs.changed-projects }}'"
         
+        # Verify outputs match expectations for each scenario
         case "${{ matrix.test-scenario.name }}" in
           "no-changes")
             if [[ "${{ steps.test-action.outputs.skipped }}" == "true" ]]; then
               echo "✅ No-changes scenario: correctly skipped"
             else
               echo "❌ No-changes scenario: should have been skipped"
+              echo "Expected: skipped=true, Got: skipped=${{ steps.test-action.outputs.skipped }}"
               exit 1
             fi
             ;;
-          "all-languages"|"skip-dependencies")
+          "real-projects")
             if [[ "${{ steps.test-action.outputs.skipped }}" == "false" ]]; then
               echo "✅ Processing scenario: correctly processed projects"
+              
               success_count="${{ steps.test-action.outputs.success-count }}"
+              
               if [[ "$success_count" -gt 0 ]]; then
                 echo "✅ Generated $success_count SCIP indexes"
               else
                 echo "⚠️ No SCIP indexes generated successfully"
-                if [[ -n "${{ steps.test-action.outputs.failed-projects }}" ]]; then
-                  echo "Failed projects: ${{ steps.test-action.outputs.failed-projects }}"
-                fi
+                echo "This could indicate issues with the SCIP tools or project setup"
               fi
             else
               echo "❌ Processing scenario: should have processed projects"
+              echo "Expected: skipped=false, Got: skipped=${{ steps.test-action.outputs.skipped }}"
               exit 1
             fi
             ;;
         esac
-
-    - name: Check generated indexes
-      if: matrix.test-scenario.name != 'no-changes'
-      run: |
-        echo "=== Checking generated SCIP indexes ==="
-        cd test-projects
-        
-        index_count=0
-        total_size=0
-        
-        find . -name "index.scip" -type f | while read -r scip_file; do
-          size=$(stat -c%s "$scip_file" 2>/dev/null || echo "0")
-          echo "Found: $scip_file ($size bytes)"
-          
-          if [[ $size -gt 0 ]]; then
-            echo "  ✅ File has content ($size bytes)"
-            file_type=$(file "$scip_file" 2>/dev/null || echo "unknown")
-            echo "  File type: $file_type"
-            echo "  First bytes (hex): $(head -c 20 "$scip_file" | xxd -l 20 -p | tr '\n' ' ' || echo 'unable to read')"
-          else
-            echo "  ❌ File is empty"
-          fi
-          
-          ((index_count++))
-          ((total_size += size))
-        done
-        
-        echo ""
-        echo "=== SCIP Index Summary ==="
-        echo "Total indexes found: $index_count"
-        echo "Total size: $total_size bytes"
-        
-        echo ""
-        echo "=== Per-project index status ==="
-        for project_dir in go-app ts-app python-app java-app; do
-          if [[ -d "$project_dir" ]]; then
-            if [[ -f "$project_dir/index.scip" ]]; then
-              size=$(stat -c%s "$project_dir/index.scip" 2>/dev/null || echo "0")
-              echo "✅ $project_dir: index.scip present ($size bytes)"
-            else
-              echo "❌ $project_dir: no index.scip found"
-            fi
-          fi
-        done
-
-    - name: Test summary
-      run: |
-        echo "=== Test Summary for ${{ matrix.test-scenario.name }} ==="
-        echo "Description: ${{ matrix.test-scenario.description }}"
-        echo "Skip dependencies: ${{ matrix.test-scenario.skip-deps }}"
-        echo "Action skipped: ${{ steps.test-action.outputs.skipped }}"
-        echo "Success count: ${{ steps.test-action.outputs.success-count }}"
-        echo "Total count: ${{ steps.test-action.outputs.total-count }}"
-        
-        echo ""
-        echo "=== SCIP Tools Used ==="
-        for tool in scip-go scip-typescript scip-python scip-java; do
-          if command -v $tool &> /dev/null; then
-            echo "$tool: $(which $tool)"
-          fi
-        done
-
-  test-pr-comment:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write
-      packages: read
-    container:
-      image: ghcr.io/${{ github.repository }}:latest
-    
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Create minimal test project for PR comment
-      run: |
-        mkdir test-project
-        echo 'module test' > test-project/go.mod
-        echo 'package main; func main() {}' > test-project/main.go
-
-    - name: Test PR comment functionality
-      uses: ./
-      with:
-        working-directory: test-project
-
-    - name: Verify PR comment was created
-      uses: actions/github-script@v7
-      with:
-        script: |
-          const comments = await github.rest.issues.listComments({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-          });
-          
-          const scipComments = comments.data.filter(comment => 
-            comment.body.includes('SCIP Index Generation Results')
-          );
-          
-          console.log(`Found ${scipComments.length} SCIP-related comments`);
-          
-          if (scipComments.length > 0) {
-            console.log('✅ PR comment functionality working');
-          } else {
-            console.log('⚠️ No SCIP comments found');
-          }
