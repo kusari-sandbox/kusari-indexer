@@ -59,8 +59,5 @@ RUN echo "=== Tool versions ===" && \
     which scip-java && scip-java --help > /dev/null && echo "✅ scip-java working" && \
     echo "=== All SCIP tools ready ==="
 
-# Set working directory
-WORKDIR /workspace
-
 # Set default shell to bash for compatibility
 SHELL ["/bin/bash", "-c"]
