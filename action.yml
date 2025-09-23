@@ -134,28 +134,6 @@ runs:
               echo "Found project: $project_root (from file: $file)"
             fi
           done
-        else
-          echo "Git change detection failed or no changes. Scanning all projects..."
-          
-          while IFS= read -r -d '' project_file; do
-            project_dir=$(dirname "$project_file")
-            project_dir=$(realpath --relative-to="$PWD" "$project_dir" 2>/dev/null || dirname "$project_file")
-            project_dirs+=("$project_dir")
-            echo "Found project: $project_dir"
-          done < <(find . -type f \( \
-            -name "go.mod" -o \
-            -name "package.json" -o \
-            -name "setup.py" -o \
-            -name "pyproject.toml" -o \
-            -name "pom.xml" -o \
-            -name "build.gradle" -o \
-            -name "build.gradle.kts" \
-          \) -print0 2>/dev/null)
-          
-          # Remove duplicates
-          if [[ ${#project_dirs[@]} -gt 0 ]]; then
-            IFS=$'\n' project_dirs=($(printf '%s\n' "${project_dirs[@]}" | sort -u))
-          fi
         fi
         
         project_count=${#project_dirs[@]}
