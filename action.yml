@@ -18,46 +18,36 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Get changed files
+      id: changed-files
+      uses: tj-actions/changed-files@v44
+      with:
+        files: |
+          **/*.{go,ts,tsx,js,jsx,py,java,scala,kt}
+          **/go.mod
+          **/package.json
+          **/setup.py
+          **/pyproject.toml
+          **/requirements.txt
+          **/Pipfile
+          **/pom.xml
+          **/build.gradle
+          **/build.gradle.kts
+
     - name: Generate SCIP indexes
       id: generate-indexes
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # Get changed files using git
-        echo "Detecting changed files..."
-        
-        # Determine comparison range based on event type
-        if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-          # For PRs, compare against base branch
-          base_sha="${{ github.event.pull_request.base.sha }}"
-          head_sha="${{ github.event.pull_request.head.sha }}"
-          echo "PR detected: comparing $base_sha..$head_sha"
-          changed_files=$(git diff --name-only "$base_sha..$head_sha" 2>/dev/null || git diff --name-only HEAD~1..HEAD 2>/dev/null || echo "")
-        else
-          # For pushes, compare against previous commit
-          echo "Push detected: comparing against HEAD~1"
-          changed_files=$(git diff --name-only HEAD~1..HEAD 2>/dev/null || git ls-files 2>/dev/null || echo "")
-        fi
-        
-        # Filter for relevant file extensions and project files
-        relevant_files=""
-        if [[ -n "$changed_files" ]]; then
-          echo "All changed files:"
-          echo "$changed_files"
-          
-          # Filter for supported files
-          relevant_files=$(echo "$changed_files" | grep -E '\.(go|ts|tsx|js|jsx|py|java|scala|kt)$|go\.mod$|package\.json$|setup\.py$|pyproject\.toml$|requirements\.txt$|Pipfile$|pom\.xml$|build\.gradle(\.kts)?$' 2>/dev/null || echo "")
-        fi
-        
-        # Exit if no relevant changes
-        if [[ -z "$relevant_files" ]]; then
+        # Check if any relevant files changed
+        if [[ "${{ steps.changed-files.outputs.any_changed }}" != "true" ]]; then
           echo "No relevant files changed"
           echo "scip_indexes=" >> "$GITHUB_OUTPUT"
           exit 0
         fi
         
-        echo "Relevant changed files:"
-        echo "$relevant_files"
+        echo "Changed files:"
+        echo "${{ steps.changed-files.outputs.all_changed_files }}"
         
         # Function to find project root
         find_project_root() {
@@ -84,20 +74,27 @@ runs:
         
         # Find unique project directories
         declare -A projects
-        while IFS= read -r file; do
-          [[ -z "$file" ]] && continue
+        for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
           # Remove working directory prefix if present
           relative_file="${file#${{ inputs.working-directory }}/}"
           project_root=$(find_project_root "$relative_file")
           
           if [[ -n "$project_root" ]]; then
             projects["$project_root"]=1
+            echo "Found project: $project_root (from changed file: $file)"
           fi
-        done <<< "$relevant_files"
+        done
+        
+        # Exit if no projects found
+        if [[ ${#projects[@]} -eq 0 ]]; then
+          echo "No projects found for changed files"
+          echo "scip_indexes=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
         
         # Generate SCIP indexes for each project
         for project_dir in "${!projects[@]}"; do
-          echo "Processing: $project_dir"
+          echo "Processing project: $project_dir"
           
           if [[ ! -d "$project_dir" ]]; then
             echo "Directory not found: $project_dir"
@@ -109,7 +106,11 @@ runs:
           # Go projects
           if [[ -f "go.mod" ]]; then
             echo "Generating Go SCIP index..."
-            scip-go --output=index.scip
+            if command -v scip-go &> /dev/null; then
+              scip-go --output=index.scip
+            else
+              echo "Warning: scip-go not found, skipping Go indexing"
+            fi
           fi
           
           # TypeScript/Node.js projects  
@@ -123,7 +124,11 @@ runs:
             else
               npm install --silent 2>/dev/null || true
             fi
-            scip-typescript index --output=index.scip
+            if command -v scip-typescript &> /dev/null; then
+              scip-typescript index --output=index.scip
+            else
+              echo "Warning: scip-typescript not found, skipping TypeScript indexing"
+            fi
           fi
           
           # Python projects
@@ -135,13 +140,21 @@ runs:
             elif [[ -f "pyproject.toml" ]]; then
               pip3 install -q . 2>/dev/null || true
             fi
-            scip-python index --output=index.scip
+            if command -v scip-python &> /dev/null; then
+              scip-python index --output=index.scip
+            else
+              echo "Warning: scip-python not found, skipping Python indexing"
+            fi
           fi
           
           # Java projects
           if [[ -f "pom.xml" || -f "build.gradle" || -f "build.gradle.kts" ]]; then
             echo "Generating Java SCIP index..."
-            scip-java index --output=index.scip
+            if command -v scip-java &> /dev/null; then
+              scip-java index --output=index.scip
+            else
+              echo "Warning: scip-java not found, skipping Java indexing"
+            fi
           fi
           
           cd - >/dev/null
