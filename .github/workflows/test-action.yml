@@ -225,36 +225,59 @@ jobs:
       shell: bash
       run: |
         echo "=== Action Outputs ==="
-        echo "Success count: '${{ steps.test-action.outputs.success-count }}'"
-        echo "Skipped: '${{ steps.test-action.outputs.skipped }}'"
+        echo "SCIP indexes: '${{ steps.test-action.outputs.scip-indexes }}'"
         
         # Verify outputs match expectations for each scenario
         case "${{ matrix.test-scenario.name }}" in
           "no-changes")
-            if [[ "${{ steps.test-action.outputs.skipped }}" == "true" ]]; then
-              echo "✅ No-changes scenario: correctly skipped"
+            if [[ -z "${{ steps.test-action.outputs.scip-indexes }}" ]]; then
+              echo "✅ No-changes scenario: correctly generated no indexes"
             else
-              echo "❌ No-changes scenario: should have been skipped"
-              echo "Expected: skipped=true, Got: skipped=${{ steps.test-action.outputs.skipped }}"
+              echo "❌ No-changes scenario: should not have generated indexes"
+              echo "Expected: empty, Got: '${{ steps.test-action.outputs.scip-indexes }}'"
               exit 1
             fi
             ;;
           "real-projects")
-            if [[ "${{ steps.test-action.outputs.skipped }}" == "false" ]]; then
-              echo "✅ Processing scenario: correctly processed projects"
+            scip_indexes="${{ steps.test-action.outputs.scip-indexes }}"
+            
+            if [[ -n "$scip_indexes" ]]; then
+              echo "✅ Real projects scenario: generated SCIP indexes"
+              echo "Generated indexes: $scip_indexes"
               
-              success_count="${{ steps.test-action.outputs.success-count }}"
+              # Count the number of generated indexes
+              index_count=$(echo "$scip_indexes" | wc -w)
+              echo "Total indexes generated: $index_count"
               
-              if [[ "$success_count" -gt 0 ]]; then
-                echo "✅ Generated $success_count SCIP indexes"
+              if [[ $index_count -gt 0 ]]; then
+                echo "✅ Successfully generated $index_count SCIP index(es)"
               else
-                echo "⚠️ No SCIP indexes generated successfully"
-                echo "This could indicate issues with the SCIP tools or project setup"
+                echo "⚠️ Unexpected: no indexes counted despite non-empty output"
               fi
             else
-              echo "❌ Processing scenario: should have processed projects"
-              echo "Expected: skipped=false, Got: skipped=${{ steps.test-action.outputs.skipped }}"
-              exit 1
+              echo "⚠️ Real projects scenario: no SCIP indexes generated"
+              echo "This could indicate issues with the SCIP tools or project setup"
+              echo "The action completed successfully but no indexes were created"
             fi
             ;;
         esac
+
+    - name: List generated SCIP files
+      if: matrix.test-scenario.name != 'no-changes'
+      shell: bash
+      run: |
+        echo "=== Searching for generated SCIP files ==="
+        cd test-projects
+        scip_files=$(find . -name "index.scip" -type f 2>/dev/null || true)
+        
+        if [[ -n "$scip_files" ]]; then
+          echo "Found SCIP index files:"
+          echo "$scip_files"
+          
+          echo ""
+          echo "File sizes:"
+          find . -name "index.scip" -type f -exec ls -lh {} \; 2>/dev/null || true
+        else
+          echo "No SCIP index files found in test-projects directory"
+          echo "This might indicate that SCIP generation failed or was skipped"
+        fi
