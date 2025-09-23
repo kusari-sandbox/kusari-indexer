@@ -50,29 +50,26 @@ jobs:
           fi
         done
 
-    - name: Create test projects
+    - name: Create Go test project
       if: matrix.test-scenario.name != 'no-changes'
       run: |
-        echo "=== Creating test projects for scenario: ${{ matrix.test-scenario.name }} ==="
-        mkdir -p test-projects
-        
-        # Go project - simple but with real Go modules
         mkdir -p test-projects/go-app
         cat > test-projects/go-app/go.mod << 'EOF'
         module example.com/test-app
 
         go 1.21
 
-        require (
-            github.com/gorilla/mux v1.8.0
-        )
+        require github.com/gorilla/mux v1.8.0
         EOF
         
         cat > test-projects/go-app/go.sum << 'EOF'
         github.com/gorilla/mux v1.8.0 h1:i40aqfkR1h2SlN9hojwV5ZA91wcXFOvJlDzI8oJk6E4=
         github.com/gorilla/mux v1.8.0/go.mod h1:DVbg23sWSpFRCP0SfiEN6jmj59UnW/n46BH5rLB71So=
         EOF
-        
+
+    - name: Create Go source files
+      if: matrix.test-scenario.name != 'no-changes'
+      run: |
         cat > test-projects/go-app/main.go << 'EOF'
         package main
 
@@ -80,7 +77,6 @@ jobs:
             "fmt"
             "log"
             "net/http"
-            
             "github.com/gorilla/mux"
         )
 
@@ -89,29 +85,19 @@ jobs:
         }
 
         func NewServer() *Server {
-            s := &Server{
-                router: mux.NewRouter(),
-            }
+            s := &Server{router: mux.NewRouter()}
             s.routes()
             return s
         }
 
         func (s *Server) routes() {
             s.router.HandleFunc("/", s.handleHome()).Methods("GET")
-            s.router.HandleFunc("/health", s.handleHealth()).Methods("GET")
             s.router.HandleFunc("/users/{id}", s.handleUserByID()).Methods("GET")
         }
 
         func (s *Server) handleHome() http.HandlerFunc {
             return func(w http.ResponseWriter, r *http.Request) {
-                fmt.Fprintf(w, "Hello, SCIP Go indexing test!")
-            }
-        }
-
-        func (s *Server) handleHealth() http.HandlerFunc {
-            return func(w http.ResponseWriter, r *http.Request) {
-                w.Header().Set("Content-Type", "application/json")
-                fmt.Fprintf(w, `{"status": "ok", "service": "scip-test"}`)
+                fmt.Fprintf(w, "Hello, SCIP!")
             }
         }
 
@@ -119,7 +105,7 @@ jobs:
             return func(w http.ResponseWriter, r *http.Request) {
                 vars := mux.Vars(r)
                 id := vars["id"]
-                fmt.Fprintf(w, `{"user_id": "%s", "name": "Test User"}`, id)
+                fmt.Fprintf(w, `{"user_id": "%s"}`, id)
             }
         }
 
@@ -129,30 +115,26 @@ jobs:
             log.Fatal(http.ListenAndServe(":8080", server.router))
         }
         EOF
-        
-        # TypeScript/Node.js project
+
+    - name: Create TypeScript project structure
+      if: matrix.test-scenario.name != 'no-changes'
+      run: |
         mkdir -p test-projects/ts-app/src
         cat > test-projects/ts-app/package.json << 'EOF'
         {
           "name": "test-ts-app",
           "version": "1.0.0",
-          "description": "Test TypeScript application for SCIP indexing",
           "main": "dist/index.js",
           "scripts": {
-            "build": "tsc",
-            "start": "node dist/index.js",
-            "dev": "ts-node src/index.ts"
+            "build": "tsc"
           },
           "dependencies": {
-            "express": "^4.18.2",
-            "cors": "^2.8.5"
+            "express": "^4.18.2"
           },
           "devDependencies": {
             "@types/express": "^4.17.17",
             "@types/node": "^20.5.0",
-            "@types/cors": "^2.8.13",
-            "typescript": "^5.0.0",
-            "ts-node": "^10.9.1"
+            "typescript": "^5.0.0"
           }
         }
         EOF
@@ -162,448 +144,152 @@ jobs:
           "compilerOptions": {
             "target": "ES2020",
             "module": "commonjs",
-            "lib": ["ES2020"],
             "outDir": "./dist",
             "rootDir": "./src",
             "strict": true,
-            "esModuleInterop": true,
-            "skipLibCheck": true,
-            "forceConsistentCasingInFileNames": true,
-            "resolveJsonModule": true,
-            "declaration": true,
-            "declarationMap": true,
-            "sourceMap": true
-          },
-          "include": ["src/**/*"],
-          "exclude": ["node_modules", "dist"]
+            "esModuleInterop": true
+          }
         }
         EOF
-        
+
+    - name: Create TypeScript source files
+      if: matrix.test-scenario.name != 'no-changes'
+      run: |
         cat > test-projects/ts-app/src/types.ts << 'EOF'
         export interface User {
           id: number;
           name: string;
           email: string;
-          createdAt: Date;
         }
 
         export interface ApiResponse<T> {
           success: boolean;
           data: T;
-          message?: string;
         }
-
-        export type UserCreateRequest = Omit<User, 'id' | 'createdAt'>;
         EOF
         
         cat > test-projects/ts-app/src/userService.ts << 'EOF'
-        import { User, UserCreateRequest, ApiResponse } from './types';
+        import { User, ApiResponse } from './types';
 
-        class UserService {
+        export class UserService {
           private users: User[] = [
-            { id: 1, name: 'John Doe', email: 'john@example.com', createdAt: new Date('2024-01-01') },
-            { id: 2, name: 'Jane Smith', email: 'jane@example.com', createdAt: new Date('2024-01-02') }
+            { id: 1, name: 'John', email: 'john@test.com' },
+            { id: 2, name: 'Jane', email: 'jane@test.com' }
           ];
 
-          public getAllUsers(): ApiResponse<User[]> {
-            return {
-              success: true,
-              data: this.users,
-              message: 'Users retrieved successfully'
-            };
+          getAllUsers(): ApiResponse<User[]> {
+            return { success: true, data: this.users };
           }
 
-          public getUserById(id: number): ApiResponse<User | null> {
+          getUserById(id: number): ApiResponse<User | null> {
             const user = this.users.find(u => u.id === id);
-            return {
-              success: !!user,
-              data: user || null,
-              message: user ? 'User found' : 'User not found'
-            };
-          }
-
-          public createUser(userData: UserCreateRequest): ApiResponse<User> {
-            const newUser: User = {
-              id: Math.max(...this.users.map(u => u.id)) + 1,
-              ...userData,
-              createdAt: new Date()
-            };
-            
-            this.users.push(newUser);
-            return {
-              success: true,
-              data: newUser,
-              message: 'User created successfully'
-            };
+            return { success: !!user, data: user || null };
           }
         }
-
-        export default UserService;
         EOF
         
         cat > test-projects/ts-app/src/index.ts << 'EOF'
-        import express, { Request, Response, NextFunction } from 'express';
-        import cors from 'cors';
-        import UserService from './userService';
-        import { UserCreateRequest } from './types';
+        import express from 'express';
+        import { UserService } from './userService';
 
         const app = express();
-        const PORT = process.env.PORT || 3000;
         const userService = new UserService();
 
-        // Middleware
-        app.use(cors());
-        app.use(express.json());
-
-        // Error handler middleware
-        const errorHandler = (err: Error, req: Request, res: Response, next: NextFunction) => {
-          console.error(err.stack);
-          res.status(500).json({
-            success: false,
-            message: 'Internal server error',
-            data: null
-          });
-        };
-
-        // Routes
-        app.get('/', (req: Request, res: Response) => {
-          res.json({ 
-            success: true, 
-            message: 'Hello, SCIP TypeScript!', 
-            timestamp: new Date().toISOString()
-          });
+        app.get('/', (req, res) => {
+          res.json({ message: 'Hello SCIP TypeScript!' });
         });
 
-        app.get('/users', (req: Request, res: Response) => {
+        app.get('/users', (req, res) => {
           const result = userService.getAllUsers();
           res.json(result);
         });
 
-        app.get('/users/:id', (req: Request, res: Response) => {
-          const id = parseInt(req.params.id, 10);
-          if (isNaN(id)) {
-            return res.status(400).json({
-              success: false,
-              message: 'Invalid user ID',
-              data: null
-            });
-          }
-          
-          const result = userService.getUserById(id);
-          const statusCode = result.success ? 200 : 404;
-          res.status(statusCode).json(result);
-        });
-
-        app.post('/users', (req: Request, res: Response) => {
-          const userData: UserCreateRequest = req.body;
-          
-          if (!userData.name || !userData.email) {
-            return res.status(400).json({
-              success: false,
-              message: 'Name and email are required',
-              data: null
-            });
-          }
-          
-          const result = userService.createUser(userData);
-          res.status(201).json(result);
-        });
-
-        app.use(errorHandler);
-
-        app.listen(PORT, () => {
-          console.log(`🚀 Server running on port ${PORT}`);
-        });
+        app.listen(3000, () => console.log('Server running'));
         EOF
-        
-        # Python project with more realistic structure
+
+    - name: Create Python project structure
+      if: matrix.test-scenario.name != 'no-changes'
+      run: |
         mkdir -p test-projects/python-app/src/myapp
         cat > test-projects/python-app/pyproject.toml << 'EOF'
         [build-system]
-        requires = ["setuptools>=61.0", "wheel"]
+        requires = ["setuptools>=61.0"]
         build-backend = "setuptools.build_meta"
 
         [project]
         name = "test-python-app"
         version = "1.0.0"
-        description = "Test Python application for SCIP indexing"
-        readme = "README.md"
-        requires-python = ">=3.8"
         dependencies = [
             "fastapi>=0.100.0",
-            "uvicorn[standard]>=0.23.0",
-            "pydantic>=2.0.0",
-            "sqlalchemy>=2.0.0",
-            "python-multipart>=0.0.6"
+            "uvicorn>=0.23.0",
+            "pydantic>=2.0.0"
         ]
-
-        [project.optional-dependencies]
-        dev = [
-            "pytest>=7.0.0",
-            "black>=23.0.0",
-            "flake8>=6.0.0",
-            "mypy>=1.0.0"
-        ]
-
-        [project.scripts]
-        myapp = "myapp.main:run"
-
-        [tool.black]
-        line-length = 88
-        target-version = ["py38", "py39", "py310", "py311"]
-
-        [tool.mypy]
-        python_version = "3.8"
-        warn_return_any = true
-        warn_unused_configs = true
-        disallow_untyped_defs = true
         EOF
         
         cat > test-projects/python-app/requirements.txt << 'EOF'
         fastapi>=0.100.0
-        uvicorn[standard]>=0.23.0
+        uvicorn>=0.23.0
         pydantic>=2.0.0
-        sqlalchemy>=2.0.0
-        python-multipart>=0.0.6
         EOF
-        
+
+    - name: Create Python source files
+      if: matrix.test-scenario.name != 'no-changes'
+      run: |
         cat > test-projects/python-app/src/myapp/__init__.py << 'EOF'
-        """Test Python application for SCIP indexing."""
+        """Test Python app for SCIP."""
         __version__ = "1.0.0"
-        __author__ = "SCIP Test Team"
         EOF
         
         cat > test-projects/python-app/src/myapp/models.py << 'EOF'
-        from datetime import datetime
-        from typing import Optional, List
-        from pydantic import BaseModel, EmailStr, Field
-        from sqlalchemy import Column, Integer, String, DateTime, Boolean
-        from sqlalchemy.ext.declarative import declarative_base
+        from typing import List
+        from pydantic import BaseModel, EmailStr
 
-        Base = declarative_base()
-
-        # Pydantic models for API
         class UserBase(BaseModel):
-            name: str = Field(..., min_length=2, max_length=100)
+            name: str
             email: EmailStr
-            is_active: bool = True
 
         class UserCreate(UserBase):
-            password: str = Field(..., min_length=8)
+            pass
 
         class UserResponse(UserBase):
             id: int
-            created_at: datetime
-            updated_at: Optional[datetime] = None
-            
+
             class Config:
                 from_attributes = True
-
-        class UserUpdate(BaseModel):
-            name: Optional[str] = Field(None, min_length=2, max_length=100)
-            email: Optional[EmailStr] = None
-            is_active: Optional[bool] = None
-
-        # SQLAlchemy models for database
-        class User(Base):
-            __tablename__ = "users"
-            
-            id = Column(Integer, primary_key=True, index=True)
-            name = Column(String(100), nullable=False)
-            email = Column(String(255), unique=True, index=True, nullable=False)
-            hashed_password = Column(String(255), nullable=False)
-            is_active = Column(Boolean, default=True, nullable=False)
-            created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-            updated_at = Column(DateTime, onupdate=datetime.utcnow)
-        EOF
-        
-        cat > test-projects/python-app/src/myapp/database.py << 'EOF'
-        from typing import List, Optional
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker, Session
-        from myapp.models import Base, User, UserCreate, UserUpdate
-
-        # In-memory SQLite for testing
-        SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-        engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
-
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        Base.metadata.create_all(bind=engine)
-
-        class UserRepository:
-            def __init__(self, db: Session):
-                self.db = db
-            
-            def create_user(self, user: UserCreate) -> User:
-                # Simple password hashing for demo
-                hashed_password = f"hashed_{user.password}"
-                
-                db_user = User(
-                    name=user.name,
-                    email=user.email,
-                    hashed_password=hashed_password,
-                    is_active=user.is_active
-                )
-                self.db.add(db_user)
-                self.db.commit()
-                self.db.refresh(db_user)
-                return db_user
-            
-            def get_user(self, user_id: int) -> Optional[User]:
-                return self.db.query(User).filter(User.id == user_id).first()
-            
-            def get_user_by_email(self, email: str) -> Optional[User]:
-                return self.db.query(User).filter(User.email == email).first()
-            
-            def get_users(self, skip: int = 0, limit: int = 100) -> List[User]:
-                return self.db.query(User).offset(skip).limit(limit).all()
-            
-            def update_user(self, user_id: int, user_update: UserUpdate) -> Optional[User]:
-                db_user = self.get_user(user_id)
-                if not db_user:
-                    return None
-                
-                update_data = user_update.dict(exclude_unset=True)
-                for field, value in update_data.items():
-                    setattr(db_user, field, value)
-                
-                self.db.commit()
-                self.db.refresh(db_user)
-                return db_user
-            
-            def delete_user(self, user_id: int) -> bool:
-                db_user = self.get_user(user_id)
-                if not db_user:
-                    return False
-                
-                self.db.delete(db_user)
-                self.db.commit()
-                return True
         EOF
         
         cat > test-projects/python-app/src/myapp/main.py << 'EOF'
-        from typing import List, Optional
-        from fastapi import FastAPI, HTTPException, Depends, status
-        from fastapi.middleware.cors import CORSMiddleware
-        from sqlalchemy.orm import Session
-        from myapp.models import UserCreate, UserResponse, UserUpdate
-        from myapp.database import SessionLocal, UserRepository
-        import uvicorn
+        from typing import List
+        from fastapi import FastAPI
+        from myapp.models import UserCreate, UserResponse
 
-        app = FastAPI(
-            title="Test SCIP Python App",
-            description="A comprehensive FastAPI application for SCIP indexing tests",
-            version="1.0.0",
-        )
+        app = FastAPI(title="Test SCIP Python App")
 
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-
-        def get_db() -> Session:
-            db = SessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        def get_user_repository(db: Session = Depends(get_db)) -> UserRepository:
-            return UserRepository(db)
+        users_db = [
+            {"id": 1, "name": "Alice", "email": "alice@test.com"},
+            {"id": 2, "name": "Bob", "email": "bob@test.com"}
+        ]
 
         @app.get("/")
         async def root():
-            return {
-                "message": "Hello, SCIP Python!",
-                "app": "test-python-app",
-                "version": "1.0.0",
-                "docs": "/docs"
-            }
-
-        @app.get("/health")
-        async def health_check():
-            return {
-                "status": "healthy",
-                "service": "scip-python-test"
-            }
-
-        @app.post("/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-        async def create_user(
-            user: UserCreate,
-            repo: UserRepository = Depends(get_user_repository)
-        ):
-            # Check if user exists
-            existing_user = repo.get_user_by_email(user.email)
-            if existing_user:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email already registered"
-                )
-            
-            return repo.create_user(user)
+            return {"message": "Hello SCIP Python!"}
 
         @app.get("/users", response_model=List[UserResponse])
-        async def get_users(
-            skip: int = 0,
-            limit: int = 100,
-            repo: UserRepository = Depends(get_user_repository)
-        ):
-            return repo.get_users(skip=skip, limit=limit)
+        async def get_users():
+            return users_db
 
-        @app.get("/users/{user_id}", response_model=UserResponse)
-        async def get_user(
-            user_id: int,
-            repo: UserRepository = Depends(get_user_repository)
-        ):
-            user = repo.get_user(user_id)
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found"
-                )
-            return user
-
-        @app.put("/users/{user_id}", response_model=UserResponse)
-        async def update_user(
-            user_id: int,
-            user_update: UserUpdate,
-            repo: UserRepository = Depends(get_user_repository)
-        ):
-            user = repo.update_user(user_id, user_update)
-            if not user:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found"
-                )
-            return user
-
-        @app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-        async def delete_user(
-            user_id: int,
-            repo: UserRepository = Depends(get_user_repository)
-        ):
-            success = repo.delete_user(user_id)
-            if not success:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="User not found"
-                )
-
-        def run():
-            """Entry point for the application."""
-            uvicorn.run(app, host="0.0.0.0", port=8000)
-
-        if __name__ == "__main__":
-            run()
+        @app.post("/users", response_model=UserResponse)
+        async def create_user(user: UserCreate):
+            new_id = max(u["id"] for u in users_db) + 1
+            new_user = {"id": new_id, **user.dict()}
+            users_db.append(new_user)
+            return new_user
         EOF
-        
-        # Java Maven project with more realistic code
-        mkdir -p test-projects/java-app/src/main/java/com/example/{model,service,controller}
-        mkdir -p test-projects/java-app/src/test/java/com/example
-        
+
+    - name: Create Java project structure
+      if: matrix.test-scenario.name != 'no-changes'
+      run: |
+        mkdir -p test-projects/java-app/src/main/java/com/example
         cat > test-projects/java-app/pom.xml << 'EOF'
         <?xml version="1.0" encoding="UTF-8"?>
         <project xmlns="http://maven.apache.org/POM/4.0.0"
@@ -615,10 +301,6 @@ jobs:
             <groupId>com.example</groupId>
             <artifactId>test-java-app</artifactId>
             <version>1.0.0</version>
-            <packaging>jar</packaging>
-            
-            <name>Test Java App</name>
-            <description>Test Java application for SCIP indexing</description>
             
             <properties>
                 <maven.compiler.source>17</maven.compiler.source>
@@ -637,47 +319,18 @@ jobs:
                     <artifactId>slf4j-simple</artifactId>
                     <version>2.0.7</version>
                 </dependency>
-                <dependency>
-                    <groupId>com.google.guava</groupId>
-                    <artifactId>guava</artifactId>
-                    <version>32.1.2-jre</version>
-                </dependency>
-                <dependency>
-                    <groupId>org.apache.commons</groupId>
-                    <artifactId>commons-lang3</artifactId>
-                    <version>3.12.0</version>
-                </dependency>
             </dependencies>
-            
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-compiler-plugin</artifactId>
-                        <version>3.11.0</version>
-                        <configuration>
-                            <source>17</source>
-                            <target>17</target>
-                        </configuration>
-                    </plugin>
-                </plugins>
-            </build>
         </project>
         EOF
-        
-        cat > test-projects/java-app/src/main/java/com/example/model/User.java << 'EOF'
-        package com.example.model;
+
+    - name: Create Java source files
+      if: matrix.test-scenario.name != 'no-changes'
+      run: |
+        cat > test-projects/java-app/src/main/java/com/example/User.java << 'EOF'
+        package com.example;
 
         import com.fasterxml.jackson.annotation.JsonProperty;
-        import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-        import org.apache.commons.lang3.builder.ToStringBuilder;
-        import org.apache.commons.lang3.builder.EqualsBuilder;
-        import org.apache.commons.lang3.builder.HashCodeBuilder;
 
-        import java.time.LocalDateTime;
-        import java.util.Objects;
-
-        @JsonIgnoreProperties(ignoreUnknown = true)
         public class User {
             @JsonProperty("id")
             private Long id;
@@ -687,286 +340,59 @@ jobs:
             
             @JsonProperty("email")
             private String email;
-            
-            @JsonProperty("created_at")
-            private LocalDateTime createdAt;
-            
-            @JsonProperty("is_active")
-            private Boolean isActive;
 
-            // Constructors
-            public User() {
-                this.isActive = true;
-                this.createdAt = LocalDateTime.now();
-            }
+            public User() {}
 
-            public User(String name, String email) {
-                this();
+            public User(Long id, String name, String email) {
+                this.id = id;
                 this.name = name;
                 this.email = email;
             }
 
-            public User(Long id, String name, String email) {
-                this(name, email);
-                this.id = id;
-            }
-
-            // Getters and setters
-            public Long getId() { 
-                return id; 
-            }
+            public Long getId() { return id; }
+            public void setId(Long id) { this.id = id; }
             
-            public void setId(Long id) { 
-                this.id = id; 
-            }
-
-            public String getName() { 
-                return name; 
-            }
+            public String getName() { return name; }
+            public void setName(String name) { this.name = name; }
             
-            public void setName(String name) { 
-                this.name = name; 
-            }
-
-            public String getEmail() { 
-                return email; 
-            }
-            
-            public void setEmail(String email) { 
-                this.email = email; 
-            }
-
-            public LocalDateTime getCreatedAt() { 
-                return createdAt; 
-            }
-            
-            public void setCreatedAt(LocalDateTime createdAt) { 
-                this.createdAt = createdAt; 
-            }
-
-            public Boolean getIsActive() { 
-                return isActive; 
-            }
-            
-            public void setIsActive(Boolean isActive) { 
-                this.isActive = isActive; 
-            }
-
-            // Utility methods
-            public boolean isActive() {
-                return Boolean.TRUE.equals(isActive);
-            }
-
-            public User activate() {
-                this.isActive = true;
-                return this;
-            }
-
-            public User deactivate() {
-                this.isActive = false;
-                return this;
-            }
-
-            @Override
-            public boolean equals(Object obj) {
-                if (this == obj) return true;
-                if (obj == null || getClass() != obj.getClass()) return false;
-                
-                User user = (User) obj;
-                return new EqualsBuilder()
-                    .append(id, user.id)
-                    .append(email, user.email)
-                    .isEquals();
-            }
-
-            @Override
-            public int hashCode() {
-                return new HashCodeBuilder(17, 37)
-                    .append(id)
-                    .append(email)
-                    .toHashCode();
-            }
+            public String getEmail() { return email; }
+            public void setEmail(String email) { this.email = email; }
 
             @Override
             public String toString() {
-                return new ToStringBuilder(this)
-                    .append("id", id)
-                    .append("name", name)
-                    .append("email", email)
-                    .append("createdAt", createdAt)
-                    .append("isActive", isActive)
-                    .toString();
+                return "User{id=" + id + ", name='" + name + "', email='" + email + "'}";
             }
         }
         EOF
         
-        cat > test-projects/java-app/src/main/java/com/example/service/UserService.java << 'EOF'
-        package com.example.service;
+        cat > test-projects/java-app/src/main/java/com/example/UserService.java << 'EOF'
+        package com.example;
 
-        import com.example.model.User;
-        import com.google.common.collect.ImmutableList;
         import org.slf4j.Logger;
         import org.slf4j.LoggerFactory;
-        import org.apache.commons.lang3.StringUtils;
-
-        import java.time.LocalDateTime;
         import java.util.List;
-        import java.util.Map;
-        import java.util.Optional;
-        import java.util.concurrent.ConcurrentHashMap;
-        import java.util.concurrent.atomic.AtomicLong;
-        import java.util.stream.Collectors;
+        import java.util.ArrayList;
 
         public class UserService {
             private static final Logger logger = LoggerFactory.getLogger(UserService.class);
-            
-            private final Map<Long, User> users = new ConcurrentHashMap<>();
-            private final AtomicLong idGenerator = new AtomicLong(1);
+            private List<User> users = new ArrayList<>();
 
             public UserService() {
-                // Initialize with some test data
-                initializeTestData();
+                users.add(new User(1L, "Alice", "alice@test.com"));
+                users.add(new User(2L, "Bob", "bob@test.com"));
             }
 
-            private void initializeTestData() {
-                logger.info("Initializing test data for UserService");
-                
-                createUser(new User("Alice Johnson", "alice@example.com"));
-                createUser(new User("Bob Wilson", "bob@example.com"));
-                createUser(new User("Charlie Brown", "charlie@example.com"));
-                
-                logger.info("Initialized {} test users", users.size());
+            public List<User> getAllUsers() {
+                logger.info("Getting all users");
+                return new ArrayList<>(users);
             }
 
-            public User createUser(User user) {
-                if (user == null) {
-                    throw new IllegalArgumentException("User cannot be null");
-                }
-                
-                if (StringUtils.isBlank(user.getName()) || StringUtils.isBlank(user.getEmail())) {
-                    throw new IllegalArgumentException("User name and email are required");
-                }
-
-                // Check for duplicate email
-                boolean emailExists = users.values().stream()
-                    .anyMatch(existingUser -> existingUser.getEmail().equalsIgnoreCase(user.getEmail()));
-                
-                if (emailExists) {
-                    throw new IllegalStateException("User with email " + user.getEmail() + " already exists");
-                }
-
-                user.setId(idGenerator.getAndIncrement());
-                user.setCreatedAt(LocalDateTime.now());
-                users.put(user.getId(), user);
-                
+            public User createUser(String name, String email) {
+                Long id = (long) (users.size() + 1);
+                User user = new User(id, name, email);
+                users.add(user);
                 logger.info("Created user: {}", user);
                 return user;
-            }
-
-            public Optional<User> findById(Long id) {
-                if (id == null) {
-                    return Optional.empty();
-                }
-                
-                User user = users.get(id);
-                logger.debug("Finding user by id {}: {}", id, user != null ? "found" : "not found");
-                return Optional.ofNullable(user);
-            }
-
-            public Optional<User> findByEmail(String email) {
-                if (StringUtils.isBlank(email)) {
-                    return Optional.empty();
-                }
-                
-                Optional<User> result = users.values().stream()
-                    .filter(user -> user.getEmail().equalsIgnoreCase(email))
-                    .findFirst();
-                
-                logger.debug("Finding user by email {}: {}", email, result.isPresent() ? "found" : "not found");
-                return result;
-            }
-
-            public List<User> findAll() {
-                List<User> allUsers = ImmutableList.copyOf(users.values());
-                logger.debug("Retrieved {} users", allUsers.size());
-                return allUsers;
-            }
-
-            public List<User> findActiveUsers() {
-                List<User> activeUsers = users.values().stream()
-                    .filter(User::isActive)
-                    .collect(Collectors.toList());
-                
-                logger.debug("Found {} active users out of {} total", activeUsers.size(), users.size());
-                return activeUsers;
-            }
-
-            public boolean updateUser(Long id, User updatedUser) {
-                if (id == null || updatedUser == null) {
-                    return false;
-                }
-
-                User existingUser = users.get(id);
-                if (existingUser == null) {
-                    logger.warn("Attempted to update non-existent user with id: {}", id);
-                    return false;
-                }
-
-                // Update fields if provided
-                if (StringUtils.isNotBlank(updatedUser.getName())) {
-                    existingUser.setName(updatedUser.getName());
-                }
-                
-                if (StringUtils.isNotBlank(updatedUser.getEmail()) && 
-                    !existingUser.getEmail().equalsIgnoreCase(updatedUser.getEmail())) {
-                    
-                    // Check for email conflicts
-                    boolean emailConflict = users.values().stream()
-                        .anyMatch(user -> !user.getId().equals(id) && 
-                                 user.getEmail().equalsIgnoreCase(updatedUser.getEmail()));
-                    
-                    if (emailConflict) {
-                        logger.warn("Cannot update user {}: email {} already exists", id, updatedUser.getEmail());
-                        return false;
-                    }
-                    
-                    existingUser.setEmail(updatedUser.getEmail());
-                }
-
-                if (updatedUser.getIsActive() != null) {
-                    existingUser.setIsActive(updatedUser.getIsActive());
-                }
-
-                logger.info("Updated user: {}", existingUser);
-                return true;
-            }
-
-            public boolean deleteUser(Long id) {
-                if (id == null) {
-                    return false;
-                }
-
-                User removedUser = users.remove(id);
-                boolean deleted = removedUser != null;
-                
-                if (deleted) {
-                    logger.info("Deleted user: {}", removedUser);
-                } else {
-                    logger.warn("Attempted to delete non-existent user with id: {}", id);
-                }
-                
-                return deleted;
-            }
-
-            public long getUserCount() {
-                return users.size();
-            }
-
-            public void clearAllUsers() {
-                int count = users.size();
-                users.clear();
-                idGenerator.set(1);
-                logger.info("Cleared all {} users from service", count);
             }
         }
         EOF
@@ -974,146 +400,50 @@ jobs:
         cat > test-projects/java-app/src/main/java/com/example/Main.java << 'EOF'
         package com.example;
 
-        import com.example.model.User;
-        import com.example.service.UserService;
         import com.fasterxml.jackson.databind.ObjectMapper;
-        import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
         import org.slf4j.Logger;
         import org.slf4j.LoggerFactory;
 
-        import java.util.List;
-        import java.util.Optional;
-
         public class Main {
             private static final Logger logger = LoggerFactory.getLogger(Main.class);
-            private static final ObjectMapper objectMapper = new ObjectMapper()
-                .registerModule(new JavaTimeModule());
 
             public static void main(String[] args) {
                 logger.info("Starting Test Java App for SCIP indexing");
 
                 try {
-                    UserService userService = new UserService();
-                    demonstrateUserOperations(userService);
+                    UserService service = new UserService();
+                    ObjectMapper mapper = new ObjectMapper();
+
+                    String json = mapper.writeValueAsString(service.getAllUsers());
+                    logger.info("Users JSON: {}", json);
+
+                    service.createUser("Charlie", "charlie@test.com");
                 } catch (Exception e) {
-                    logger.error("Application error", e);
-                    System.exit(1);
+                    logger.error("Error", e);
                 }
-
-                logger.info("Application completed successfully");
-            }
-
-            private static void demonstrateUserOperations(UserService userService) throws Exception {
-                logger.info("=== Demonstrating User Operations ===");
-
-                // List all users
-                List<User> allUsers = userService.findAll();
-                logger.info("All users ({}):", allUsers.size());
-                for (User user : allUsers) {
-                    logger.info("  - {}", user);
-                }
-
-                // Serialize users to JSON
-                String usersJson = objectMapper.writeValueAsString(allUsers);
-                logger.info("Users as JSON: {}", usersJson);
-
-                // Find user by ID
-                Optional<User> user1 = userService.findById(1L);
-                if (user1.isPresent()) {
-                    logger.info("Found user by ID 1: {}", user1.get());
-                } else {
-                    logger.warn("User with ID 1 not found");
-                }
-
-                // Find user by email
-                Optional<User> userByEmail = userService.findByEmail("alice@example.com");
-                if (userByEmail.isPresent()) {
-                    logger.info("Found user by email: {}", userByEmail.get());
-                } else {
-                    logger.warn("User with email 'alice@example.com' not found");
-                }
-
-                // Create new user
-                User newUser = new User("David Miller", "david@example.com");
-                User createdUser = userService.createUser(newUser);
-                logger.info("Created new user: {}", createdUser);
-
-                // Update user
-                User updateData = new User();
-                updateData.setName("David M. Miller");
-                updateData.setIsActive(true);
-                
-                boolean updateResult = userService.updateUser(createdUser.getId(), updateData);
-                logger.info("User update result: {}", updateResult ? "success" : "failed");
-
-                // List active users
-                List<User> activeUsers = userService.findActiveUsers();
-                logger.info("Active users ({}): {}", activeUsers.size(), activeUsers);
-
-                // Final count
-                logger.info("Total users in service: {}", userService.getUserCount());
             }
         }
         EOF
-        
-        echo "=== Test projects created ==="
-        find test-projects -type f \( -name "go.mod" -o -name "package.json" -o -name "*.toml" -o -name "pom.xml" \) | sort
 
     - name: Create test project with no relevant changes
       if: matrix.test-scenario.name == 'no-changes'
       run: |
-        echo "=== Creating test project with no relevant changes ==="
         mkdir -p test-projects/docs-only
-        
-        # Create only documentation and config files (not tracked by the action)
         cat > test-projects/docs-only/README.md << 'EOF'
-        # Documentation Only Project
-
-        This project only contains documentation and configuration files that should not trigger SCIP indexing.
-
-        ## Features
-        - Documentation
-        - Configuration
-        - No source code
+        # Documentation Project
+        This project only contains documentation files.
         EOF
         
         cat > test-projects/docs-only/CHANGELOG.md << 'EOF'
         # Changelog
-
         ## v1.0.0
         - Initial documentation
-        - Added README and CHANGELOG
-        EOF
-        
-        cat > test-projects/docs-only/.gitignore << 'EOF'
-        # Build outputs
-        /build/
-        /dist/
-        /target/
-
-        # IDE files
-        .vscode/
-        .idea/
-        *.swp
-        *.swo
-        EOF
-        
-        cat > test-projects/docs-only/docker-compose.yml << 'EOF'
-        version: '3.8'
-        services:
-          docs:
-            image: nginx:alpine
-            ports:
-              - "8080:80"
-            volumes:
-              - ./docs:/usr/share/nginx/html:ro
         EOF
 
     - name: Simulate file changes for testing
       if: matrix.test-scenario.name != 'no-changes'
       run: |
         echo "=== Simulating file changes ==="
-        # Touch some source files to ensure they appear as "changed"
         touch test-projects/go-app/main.go
         touch test-projects/ts-app/src/index.ts
         touch test-projects/python-app/src/myapp/main.py
@@ -1121,6 +451,12 @@ jobs:
         
         echo "Files that should be detected as changed:"
         find test-projects -name "*.go" -o -name "*.ts" -o -name "*.py" -o -name "*.java" | head -10
+
+    - name: List created projects
+      if: matrix.test-scenario.name != 'no-changes'
+      run: |
+        echo "=== Created test projects ==="
+        find test-projects -type f \( -name "go.mod" -o -name "package.json" -o -name "*.toml" -o -name "pom.xml" \) | sort
 
     - name: Test the SCIP action
       id: test-action
@@ -1138,45 +474,35 @@ jobs:
         echo "Failed projects: '${{ steps.test-action.outputs.failed-projects }}'"
         echo "Changed projects: '${{ steps.test-action.outputs.changed-projects }}'"
         
-        # Verify outputs match expectations for each scenario
         case "${{ matrix.test-scenario.name }}" in
           "no-changes")
             if [[ "${{ steps.test-action.outputs.skipped }}" == "true" ]]; then
               echo "✅ No-changes scenario: correctly skipped"
             else
               echo "❌ No-changes scenario: should have been skipped"
-              echo "Expected: skipped=true, Got: skipped=${{ steps.test-action.outputs.skipped }}"
               exit 1
             fi
             ;;
           "all-languages"|"skip-dependencies")
             if [[ "${{ steps.test-action.outputs.skipped }}" == "false" ]]; then
               echo "✅ Processing scenario: correctly processed projects"
-              
               success_count="${{ steps.test-action.outputs.success-count }}"
-              total_count="${{ steps.test-action.outputs.total-count }}"
-              
               if [[ "$success_count" -gt 0 ]]; then
-                echo "✅ Generated $success_count SCIP indexes out of $total_count projects"
+                echo "✅ Generated $success_count SCIP indexes"
               else
                 echo "⚠️ No SCIP indexes generated successfully"
-                echo "This could indicate issues with the SCIP tools or project setup"
-                
-                # Show failed projects if any
                 if [[ -n "${{ steps.test-action.outputs.failed-projects }}" ]]; then
-                  echo "Failed projects:"
-                  echo "${{ steps.test-action.outputs.failed-projects }}"
+                  echo "Failed projects: ${{ steps.test-action.outputs.failed-projects }}"
                 fi
               fi
             else
               echo "❌ Processing scenario: should have processed projects"
-              echo "Expected: skipped=false, Got: skipped=${{ steps.test-action.outputs.skipped }}"
               exit 1
             fi
             ;;
         esac
 
-    - name: Check generated indexes with real tools
+    - name: Check generated indexes
       if: matrix.test-scenario.name != 'no-changes'
       run: |
         echo "=== Checking generated SCIP indexes ==="
@@ -1185,22 +511,15 @@ jobs:
         index_count=0
         total_size=0
         
-        echo "Searching for SCIP index files..."
         find . -name "index.scip" -type f | while read -r scip_file; do
           size=$(stat -c%s "$scip_file" 2>/dev/null || echo "0")
           echo "Found: $scip_file ($size bytes)"
           
-          # Verify the file has content and looks like a real SCIP index
           if [[ $size -gt 0 ]]; then
             echo "  ✅ File has content ($size bytes)"
-            
-            # Check if it's a binary file (real SCIP indexes are typically binary)
             file_type=$(file "$scip_file" 2>/dev/null || echo "unknown")
             echo "  File type: $file_type"
-            
-            # Show first few bytes as hex to verify it's not just text
             echo "  First bytes (hex): $(head -c 20 "$scip_file" | xxd -l 20 -p | tr '\n' ' ' || echo 'unable to read')"
-            
           else
             echo "  ❌ File is empty"
           fi
@@ -1214,7 +533,6 @@ jobs:
         echo "Total indexes found: $index_count"
         echo "Total size: $total_size bytes"
         
-        # Additional verification: check project directories for indexes
         echo ""
         echo "=== Per-project index status ==="
         for project_dir in go-app ts-app python-app java-app; do
@@ -1227,23 +545,6 @@ jobs:
             fi
           fi
         done
-        
-        # Success criteria
-        if [[ "${{ matrix.test-scenario.name }}" != "no-changes" ]]; then
-          if [[ $index_count -gt 0 ]]; then
-            echo ""
-            echo "✅ Test passed: SCIP indexes were generated by real tools"
-          else
-            echo ""
-            echo "⚠️ No SCIP indexes found"
-            echo "This might indicate:"
-            echo "  - SCIP tools failed to process the projects"
-            echo "  - Projects don't meet SCIP tool requirements"
-            echo "  - Tool configuration issues"
-            echo ""
-            echo "Check the action logs above for specific error messages"
-          fi
-        fi
 
     - name: Test summary
       run: |
@@ -1253,27 +554,15 @@ jobs:
         echo "Action skipped: ${{ steps.test-action.outputs.skipped }}"
         echo "Success count: ${{ steps.test-action.outputs.success-count }}"
         echo "Total count: ${{ steps.test-action.outputs.total-count }}"
-        echo "Container image: ghcr.io/${{ github.repository }}:latest"
         
-        # Show SCIP tool versions that were used
         echo ""
         echo "=== SCIP Tools Used ==="
         for tool in scip-go scip-typescript scip-python scip-java; do
           if command -v $tool &> /dev/null; then
             echo "$tool: $(which $tool)"
-            $tool --version 2>/dev/null || $tool --help 2>/dev/null | head -n 1 || echo "  (version info not available)"
           fi
         done
-        
-        if [[ "${{ job.status }}" == "success" ]]; then
-          echo ""
-          echo "✅ Test scenario '${{ matrix.test-scenario.name }}' completed successfully"
-        else
-          echo ""
-          echo "❌ Test scenario '${{ matrix.test-scenario.name }}' failed"
-        fi
 
-  # Test PR comment functionality with real GitHub API
   test-pr-comment:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
@@ -1319,8 +608,6 @@ jobs:
           
           if (scipComments.length > 0) {
             console.log('✅ PR comment functionality working');
-            console.log('Latest comment preview:');
-            console.log(scipComments[scipComments.length - 1].body.substring(0, 200) + '...');
           } else {
-            console.log('⚠️ No SCIP comments found - this might indicate an issue with PR commenting');
+            console.log('⚠️ No SCIP comments found');
           }
