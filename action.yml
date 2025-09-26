@@ -124,8 +124,16 @@ runs:
             else
               npm install --silent 2>/dev/null || true
             fi
+            
             if command -v scip-typescript &> /dev/null; then
-              scip-typescript index --output=index.scip
+              # Check for tsconfig.json to determine indexing method
+              if [[ -f "tsconfig.json" ]]; then
+                echo "Found tsconfig.json, running standard TypeScript indexing"
+                scip-typescript index --output=index.scip
+              else
+                echo "No tsconfig.json found, running JavaScript indexing with inferred config"
+                scip-typescript index --infer-tsconfig --output=index.scip
+              fi
             else
               echo "Warning: scip-typescript not found, skipping TypeScript indexing"
             fi
