@@ -64,7 +64,7 @@ jobs:
         docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest bash -c "
           echo '=== Testing SCIP tools ==='
           scip-go --help > /dev/null && echo '✅ scip-go works'
-          scip-typescript --help > /dev/null && echo '✅ scip-typescript works'  
+          scip-typescript --help > /dev/null && echo '✅ scip-typescript works'
           scip-python --help > /dev/null && echo '✅ scip-python works'
           scip-java --help > /dev/null && echo '✅ scip-java works'
           echo '=== All tools verified ==='
