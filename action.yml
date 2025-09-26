@@ -107,7 +107,7 @@ runs:
           if [[ -f "go.mod" ]]; then
             echo "Generating Go SCIP index..."
             if command -v scip-go &> /dev/null; then
-              scip-go --output=index.scip
+              scip-go --output=index.scip || true
             else
               echo "Warning: scip-go not found, skipping Go indexing"
             fi
@@ -129,10 +129,10 @@ runs:
               # Check for tsconfig.json to determine indexing method
               if [[ -f "tsconfig.json" ]]; then
                 echo "Found tsconfig.json, running standard TypeScript indexing"
-                scip-typescript index --output=index.scip
+                scip-typescript index --output=index.scip || true
               else
                 echo "No tsconfig.json found, running JavaScript indexing with inferred config"
-                scip-typescript index --infer-tsconfig --output=index.scip
+                scip-typescript index --infer-tsconfig --output=index.scip || true
               fi
             else
               echo "Warning: scip-typescript not found, skipping TypeScript indexing"
@@ -149,7 +149,7 @@ runs:
               pip3 install -q . 2>/dev/null || true
             fi
             if command -v scip-python &> /dev/null; then
-              scip-python index --output=index.scip
+              scip-python index --output=index.scip || true
             else
               echo "Warning: scip-python not found, skipping Python indexing"
             fi
@@ -159,7 +159,7 @@ runs:
           if [[ -f "pom.xml" || -f "build.gradle" || -f "build.gradle.kts" ]]; then
             echo "Generating Java SCIP index..."
             if command -v scip-java &> /dev/null; then
-              scip-java index --output=index.scip
+              scip-java index --output=index.scip || true
             else
               echo "Warning: scip-java not found, skipping Java indexing"
             fi
