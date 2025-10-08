@@ -9,6 +9,16 @@ inputs:
     description: 'Working directory to run the action from'
     required: false
     default: '.'
+  kusari-client-id:
+    description: 'Kusari client ID for authentication'
+    required: true
+  kusari-client-secret:
+    description: 'Kusari client secret for authentication'
+    required: true
+  github-token:
+    description: 'GitHub token for posting PR comments'
+    required: true
+    default: ${{ github.token }}
 
 outputs:
   scip-indexes:
@@ -18,6 +28,25 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+
+    - name: Install Kusari CLI
+      shell: bash
+      run: |
+        go install github.com/kusaridev/kusari-cli/kusari@latest
+        echo "$HOME/go/bin" >> $GITHUB_PATH
+
+    - name: Authenticate with Kusari
+      shell: bash
+      env:
+        KUSARI_CLIENT_ID: ${{ inputs.kusari-client-id }}
+        KUSARI_CLIENT_SECRET: ${{ inputs.kusari-client-secret }}
+      run: |
+        kusari auth login
+
     - name: Get changed files
       id: changed-files
       uses: tj-actions/changed-files@v44
@@ -179,3 +208,70 @@ runs:
           echo "No SCIP indexes generated"
           echo "scip_indexes=" >> "$GITHUB_OUTPUT"
         fi
+
+    - name: Run Kusari Repo Scan
+      id: kusari-scan
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        KUSARI_CLIENT_ID: ${{ inputs.kusari-client-id }}
+        KUSARI_CLIENT_SECRET: ${{ inputs.kusari-client-secret }}
+      run: |
+        # Run kusari scan and capture output
+        echo "Running Kusari repo scan against base ref: ${{ github.event.pull_request.base.ref }}"
+        
+        # Run the scan and save output to a file
+        if kusari repo scan ${{ github.event.pull_request.base.ref }} > kusari_scan_output.txt 2>&1; then
+          echo "Kusari scan completed successfully"
+          scan_exit_code=0
+        else
+          echo "Kusari scan completed with warnings or errors"
+          scan_exit_code=$?
+        fi
+        
+        # Read the output
+        scan_output=$(cat kusari_scan_output.txt)
+        
+        # Save output to GitHub output (escape for multiline)
+        {
+          echo 'scan_output<<EOF'
+          echo "$scan_output"
+          echo 'EOF'
+        } >> "$GITHUB_OUTPUT"
+        
+        echo "scan_exit_code=$scan_exit_code" >> "$GITHUB_OUTPUT"
+
+    - name: Post Kusari Scan Results to PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const output = `${{ steps.kusari-scan.outputs.scan_output }}`;
+          const exitCode = ${{ steps.kusari-scan.outputs.scan_exit_code }};
+          
+          const status = exitCode === 0 ? '✅ Success' : '⚠️ Completed with warnings';
+          
+          const comment = `## Kusari Repository Scan Results ${status}
+          
+          **Base Reference:** \`${{ github.event.pull_request.base.ref }}\`
+          **Scan Exit Code:** ${exitCode}
+          
+          <details>
+          <summary>Scan Output</summary>
+          
+          \`\`\`
+          ${output}
+          \`\`\`
+          
+          </details>
+          
+          ---
+          *Scan performed by Kusari CLI*`;
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });
