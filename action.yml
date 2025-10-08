@@ -45,7 +45,7 @@ runs:
         KUSARI_CLIENT_ID: ${{ inputs.kusari-client-id }}
         KUSARI_CLIENT_SECRET: ${{ inputs.kusari-client-secret }}
       run: |
-        kusari auth login
+        kusari auth login -p https://auth.dev.kusari.cloud/
 
     - name: Get changed files
       id: changed-files
@@ -221,7 +221,7 @@ runs:
         echo "Running Kusari repo scan against base ref: ${{ github.event.pull_request.base.ref }}"
         
         # Run the scan and save output to a file
-        if kusari repo scan ${{ github.event.pull_request.base.ref }} > kusari_scan_output.txt 2>&1; then
+        if kusari repo scan --platform-url "https://platform.api.dev.kusari.cloud/" ${{ github.event.pull_request.base.ref }} > kusari_scan_output.txt 2>&1; then
           echo "Kusari scan completed successfully"
           scan_exit_code=0
         else
