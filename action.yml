@@ -209,6 +209,19 @@ runs:
           echo "scip_indexes=" >> "$GITHUB_OUTPUT"
         fi
 
+    - name: Configure Git for Container
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        git config --global --add safe.directory "$GITHUB_WORKSPACE"
+        git config --global --add safe.directory "$(pwd)"
+        git fetch origin ${{ github.event.pull_request.base.ref }} || true
+        
+        # Verify git is working
+        echo "Current branch: $(git branch --show-current)"
+        echo "Base ref exists: $(git rev-parse --verify origin/${{ github.event.pull_request.base.ref }} 2>/dev/null && echo 'yes' || echo 'no')"
+    
+
     - name: Run Kusari Repo Scan
       id: kusari-scan
       shell: bash
