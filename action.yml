@@ -24,6 +24,9 @@ outputs:
   scip-indexes:
     description: 'List of generated SCIP index files'
     value: ${{ steps.generate-indexes.outputs.scip_indexes }}
+  scan-output:
+    description: 'Kusari scan output'
+    value: ${{ steps.kusari-scan.outputs.scan_output }}
 
 runs:
   using: 'composite'
@@ -221,14 +224,14 @@ runs:
         echo "Current branch: $(git branch --show-current)"
         echo "Base ref exists: $(git rev-parse --verify origin/${{ github.event.pull_request.base.ref }} 2>/dev/null && echo 'yes' || echo 'no')"
     
-
-    - name: Run Kusari Repo Scan
-      id: kusari-scan
+    - name: Run Kusari Repo Scan and Post Results
+      if: github.event_name == 'pull_request'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
         KUSARI_CLIENT_ID: ${{ inputs.kusari-client-id }}
         KUSARI_CLIENT_SECRET: ${{ inputs.kusari-client-secret }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
         # Run kusari scan and capture output
         echo "Running Kusari repo scan against base ref: origin/${{ github.event.pull_request.base.ref }}"
@@ -236,35 +239,28 @@ runs:
         # Run the scan and save output to a file
         if kusari repo scan --platform-url "https://platform.api.dev.kusari.cloud/" ${{ inputs.working-directory }} origin/${{ github.event.pull_request.base.ref }} > kusari_scan_output.txt 2>&1; then
           echo "Kusari scan completed successfully"
-          scan_exit_code=0
         else
           echo "Kusari scan completed with warnings or errors"
-          scan_exit_code=$?
         fi
         
         # Read the output
         scan_output=$(cat kusari_scan_output.txt)
         
-        # Save output to GitHub output (escape for multiline)
-        {
-          echo 'scan_output<<EOF'
-          echo "$scan_output"
-          echo 'EOF'
-        } >> "$GITHUB_OUTPUT"
+        # Format with code block
+        formatted_output="## Kusari Scan Results
+    
+        \`\`\`
+        ${scan_output}
+        \`\`\`"
+            
+        # Create JSON payload using jq for proper escaping
+        comment_body=$(jq -n --arg output "$formatted_output" '$output')
         
-        echo "scan_exit_code=$scan_exit_code" >> "$GITHUB_OUTPUT"
-
-    - name: Post Kusari Scan Results to PR
-      if: github.event_name == 'pull_request'
-      uses: actions/github-script@v7
-      env:
-        SCAN_OUTPUT: ${{ steps.kusari-scan.outputs.scan_output }}
-      with:
-        github-token: ${{ inputs.github-token }}
-        script: |
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: process.env.SCAN_OUTPUT
-          });
+        # Post comment to PR
+        curl -X POST \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+          -d "{\"body\": $comment_body}"
+        
+        echo "Posted scan results to PR"
