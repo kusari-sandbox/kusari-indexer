@@ -257,15 +257,14 @@ runs:
     - name: Post Kusari Scan Results to PR
       if: github.event_name == 'pull_request'
       uses: actions/github-script@v7
+      env:
+        SCAN_OUTPUT: ${{ steps.kusari-scan.outputs.scan_output }}
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          // Use regular string concatenation instead of template literals
-          const output = '${{ steps.kusari-scan.outputs.scan_output }}';
-          
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: output
+            body: process.env.SCAN_OUTPUT
           });
