@@ -260,31 +260,12 @@ runs:
       with:
         github-token: ${{ inputs.github-token }}
         script: |
-          const output = `${{ steps.kusari-scan.outputs.scan_output }}`;
-          const exitCode = ${{ steps.kusari-scan.outputs.scan_exit_code }};
-          
-          const status = exitCode === 0 ? '✅ Success' : '⚠️ Completed with warnings';
-          
-          const comment = `## Kusari Repository Scan Results ${status}
-          
-          **Base Reference:** \`${{ github.event.pull_request.base.ref }}\`
-          **Scan Exit Code:** ${exitCode}
-          
-          <details>
-          <summary>Scan Output</summary>
-          
-          \`\`\`
-          ${output}
-          \`\`\`
-          
-          </details>
-          
-          ---
-          *Scan performed by Kusari CLI*`;
+          // Use regular string concatenation instead of template literals
+          const output = '${{ steps.kusari-scan.outputs.scan_output }}';
           
           github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: comment
+            body: output
           });
