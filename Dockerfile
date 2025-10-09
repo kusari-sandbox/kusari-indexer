@@ -59,5 +59,9 @@ RUN echo "=== Tool versions ===" && \
     which scip-java && scip-java --help > /dev/null && echo "✅ scip-java working" && \
     echo "=== All SCIP tools ready ==="
 
+# Git refuses to run commands in "unsafe" directories
+# The safe.directory config tells git to trust this directory
+RUN git config --global --add safe.directory '*'
+
 # Set default shell to bash for compatibility
 SHELL ["/bin/bash", "-c"]
